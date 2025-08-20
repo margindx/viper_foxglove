@@ -9,6 +9,7 @@ set(PYTHON_EXECUTABLE "/opt/homebrew/Caskroom/miniconda/base/bin/python")
 
 find_package(pybind11 CONFIG REQUIRED)
 find_package(Open3D REQUIRED)
+find_package(Protobuf REQUIRED CONFIG)
 
 # Fetch Foxglove SDK
 include(FetchContent)
@@ -92,7 +93,9 @@ add_executable(viper main.cpp viper_ui.h viper_ui.cpp viper_usb.h viper_usb.cpp 
         MeshReconstruction.hpp
         FoxgloveUtility.cpp
         FoxgloveUtility.hpp
-        FoxgloveMacros.hpp)
+        FoxgloveMacros.hpp
+        DynamicProtobufDecoder.cpp
+        DynamicProtobufDecoder.hpp)
 # VPif.h VPif.cpp VPcmdDefs.h
 
 # Include libusb headers
@@ -124,3 +127,5 @@ target_link_libraries(viper PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
 target_link_libraries(viper PRIVATE pybind11::embed)
 
 target_link_libraries(viper PRIVATE Open3D::Open3D)
+
+target_link_libraries(viper PRIVATE protobuf::libprotobuf)

@@ -14,6 +14,7 @@
 
 #include "FoxgloveUtility.hpp"
 #include "FoxgloveMacros.hpp"
+#include "DynamicProtobufDecoder.hpp"
 
 #include <thread>
 #include <optional>
@@ -23,38 +24,6 @@
 using namespace std::literals::chrono_literals;
 
 namespace mdx {
-    /// @brief A channel advertised by a client.
-    struct ClientChannel {
-        /// @brief The ID of the channel.
-        uint32_t id;
-        /// @brief The topic of the channel.
-        std::string topic;
-        /// @brief The encoding of the channel.
-        std::string encoding;
-        /// @brief The name of the schema of the channel.
-        std::string schema_name;
-        /// @brief The encoding of the schema of the channel.
-        std::string schema_encoding;
-        /// @brief The schema of the channel.
-        std::vector<std::byte> schema;
-        /// @brief The length of the schema of the channel.
-        size_t schema_len;
-
-        ClientChannel() {}
-
-        ClientChannel(const foxglove::ClientChannel& channel) {
-            this->id = channel.id;
-            this->topic = std::string(channel.topic);
-            this->encoding = std::string(channel.encoding);
-            this->schema_name = std::string(channel.schema_name);
-            this->schema_encoding = std::string(channel.schema_encoding);
-            if (channel.schema && channel.schema_len > 0) {
-                this->schema = std::vector<std::byte>(channel.schema, channel.schema + channel.schema_len);
-            }
-            this->schema_len = channel.schema_len;
-        }
-    };
-
     struct Point3 {
         float x;
         float y;
@@ -210,7 +179,9 @@ class FoxgloveInterface {
     std::mutex channelMapMtx_;
     /// Hash table mapping a (client_id, client_channel_id) pair to ClientChannel
     typedef std::map<std::pair<uint32_t, uint32_t>, mdx::ClientChannel> ClientChannelMap;
+    typedef std::map<std::string, std::unique_ptr<DynamicProtobufDecoder>> DecoderMap;
     std::shared_ptr<ClientChannelMap> channelMap_;
+    DecoderMap decoderMap_;
 
     void initRawChannels() {
         {
@@ -307,14 +278,21 @@ class FoxgloveInterface {
             std::cout << "Received message from (" << client_id << ", " << client_channel_id << ") with topic " <<
             channel.topic << " and schema " << channel.schema_name << " with encoding " <<
             channel.encoding << " and schema encoding " << channel.schema_encoding << " with schema length " << channel.schema_len << std::endl;
+
+            // TODO: Make thread-safe
+            auto& decoder_ptr = decoderMap_.at(channel.schema_name);
+            auto message = decoder_ptr->decode(data, data_len);
+            printDecodedMessage(*message);
         };
 
         std::function onClientAdvertise = [&](uint32_t client_id, const foxglove::ClientChannel &channel) {
             std::cout << "Received client channel advertisement with pair (" << client_id << ", " << channel.id << ") with topic " << channel.topic << std::endl;
             {
                 std::lock_guard<std::mutex> guard{channelMapMtx_};
-                foxglove::ClientChannel c{channel};
+                mdx::ClientChannel c{channel};
                 channelMap_->operator[]({client_id, channel.id}) = c;
+                decoderMap_.emplace(c.schema_name, std::make_unique<DynamicProtobufDecoder>(c));
+                std::cout << "Successfully stored decoder in a std::map." << std::endl;
             }
         };
 
