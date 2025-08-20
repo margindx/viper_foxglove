@@ -284,31 +284,34 @@ void Viper::pnoToPosesInFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, flatbuff
 }
 
 SENFRAMEDATA *Viper::pnoTransformInBodyFrame(SENFRAMEDATA *pfd) {
-    Eigen::Quaternion<float> quat{
-        pfd->pno.ori[0],
-        pfd->pno.ori[1],
-        pfd->pno.ori[2],
-        pfd->pno.ori[3],
-    };
+//    Eigen::Quaternion<float> quat{
+//        pfd->pno.ori[0],
+//        pfd->pno.ori[1],
+//        pfd->pno.ori[2],
+//        pfd->pno.ori[3],
+//    };
+//
+//    Eigen::Vector3f pos{
+//        pfd->pno.pos[0]/100.f,
+//        pfd->pno.pos[1]/100.f,
+//        pfd->pno.pos[2]/100.f
+//    };
 
-    Eigen::Vector3f pos{
-        pfd->pno.pos[0]/100.f,
-        pfd->pno.pos[1]/100.f,
-        pfd->pno.pos[2]/100.f
-    };
-
-    Eigen::Quaternion<float> offset{
-        0,
-        offset_.x(),
-        offset_.y(),
-        offset_.z()
-    };
-
-    auto rotatedOffset = quat * offset * quat.inverse();
-
-    pfd->pno.pos[0] = pos.x() + rotatedOffset.x();
-    pfd->pno.pos[1] = pos.y() + rotatedOffset.y();
-    pfd->pno.pos[2] = pos.z() + rotatedOffset.z();
+//    Eigen::Quaternion<float> offset{
+//        0,
+//        offset_.x(),
+//        offset_.y(),
+//        offset_.z()
+//    };
+//
+//    auto rotatedOffset = quat * offset * quat.inverse();
+//
+//    pfd->pno.pos[0] = pos.x() + rotatedOffset.x();
+//    pfd->pno.pos[1] = pos.y() + rotatedOffset.y();
+//    pfd->pno.pos[2] = pos.z() + rotatedOffset.z();
+    pfd->pno.pos[0] /= 100.f;
+    pfd->pno.pos[1] /= 100.f;
+    pfd->pno.pos[2] /= 100.f;
 
     return pfd;
 }
@@ -474,25 +477,61 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
             quat
         };
 
-        // Log handheld probe pose
-        if (i == 0) {
-            auto poseInFrame = foxglove::schemas::PoseInFrame{
-                time,
-                "viper",
-                pose
-            };
-
-            arrowPrimitive_.pose.emplace(pose);
-//            posesInFrame_.timestamp.emplace(time);
-//            posesInFrame_.poses.push_back(pose);
-//            fgInterface_->publishHHPoses(posesInFrame_);
-            fgInterface_->publishPose(poseInFrame);
-        }
+//        // Log handheld probe pose
+//        if (i == 0) {
+//            auto poseInFrame = foxglove::schemas::PoseInFrame{
+//                time,
+//                "viper",
+//                pose
+//            };
+//
+//            arrowPrimitive_.pose.emplace(pose);
+////            posesInFrame_.timestamp.emplace(time);
+////            posesInFrame_.poses.push_back(pose);
+////            fgInterface_->publishHHPoses(posesInFrame_);
+//            fgInterface_->publishPose(poseInFrame);
+//        }
 
         poses.push_back(pose);
     }
 
-    auto posesinFrame = foxglove::schemas::PosesInFrame{
+    foxglove::schemas::Pose avgPose;
+    double xAvg{0}, yAvg{0}, zAvg{0}, qxAvg{0}, qyAvg{0}, qzAvg{0}, qwAvg{0};
+
+    size_t nPoses = poses.size();
+    for (auto &pose : poses) {
+        xAvg += pose.position.value().x / nPoses;
+        yAvg += pose.position.value().y / nPoses;
+        zAvg += pose.position.value().z / nPoses;
+        qxAvg += pose.orientation.value().x / nPoses;
+        qyAvg += pose.orientation.value().y / nPoses;
+        qzAvg += pose.orientation.value().z / nPoses;
+        qwAvg += pose.orientation.value().w / nPoses;
+    }
+
+    // Normalize quaternion
+    auto qMag = sqrt(qxAvg*qxAvg + qyAvg*qyAvg + qzAvg*qzAvg + qwAvg*qwAvg);
+    qxAvg /= qMag;
+    qyAvg /= qMag;
+    qzAvg /= qMag;
+    qwAvg /= qMag;
+
+    avgPose.position.emplace(foxglove::schemas::Vector3{xAvg, yAvg, zAvg});
+    avgPose.orientation.emplace(foxglove::schemas::Quaternion{qxAvg, qyAvg, qzAvg, qwAvg});
+    // Apply offset
+    transformPose(avgPose);
+    auto swingTwist = computeSwingTwist(avgPose);
+
+    auto poseInFrame = foxglove::schemas::PoseInFrame{
+            time,
+            "viper",
+            avgPose
+    };
+
+    fgInterface_->publishPose(poseInFrame);
+    fgInterface_->logSwingTwist(swingTwist);
+
+    auto posesInFrame = foxglove::schemas::PosesInFrame{
         time,
         "viper",
         poses
@@ -500,6 +539,6 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
 
 
 //    fgInterface_->publishLineToScene(linePrimitive_);
-    fgInterface_->publishArrowToScene(arrowPrimitive_);
-    fgInterface_->publishPoses(posesinFrame);
+//    fgInterface_->publishArrowToScene(arrowPrimitive_);
+    fgInterface_->publishPoses(posesInFrame);
 }

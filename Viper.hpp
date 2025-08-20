@@ -201,6 +201,63 @@ public:
     SENFRAMEDATA *pnoTransformInBodyFrame(SENFRAMEDATA *pfd);
 
     SENFRAMEDATA *pnoOffset(SENFRAMEDATA *pfd);
+
+    void transformPose(foxglove::schemas::Pose &pose) {
+        Eigen::Quaternion<double> quat{
+            pose.orientation.value().w,
+            pose.orientation.value().x,
+            pose.orientation.value().y,
+            pose.orientation.value().z
+        };
+
+        Eigen::Vector3d pos{
+            pose.position.value().x,
+            pose.position.value().y,
+            pose.position.value().z
+        };
+
+        Eigen::Quaternion<double> offset{
+            0,
+            offset_.x(),
+            offset_.y(),
+            offset_.z()
+        };
+
+        auto rotatedOffset = quat * offset * quat.inverse();
+
+        pose.position.value().x = pos.x() + rotatedOffset.x();
+        pose.position.value().y = pos.y() + rotatedOffset.y();
+        pose.position.value().z = pos.z() + rotatedOffset.z();
+    }
+
+    mdx::SwingTwist computeSwingTwist(const foxglove::schemas::Pose &pose) const {
+        typedef double T;
+
+        T qx = static_cast<T>(pose.orientation.value().x);
+        T qy = static_cast<T>(pose.orientation.value().y);
+        T qz = static_cast<T>(pose.orientation.value().z);
+        T qw = static_cast<T>(pose.orientation.value().w);
+
+//        Eigen::Vector3<T> nor = {
+//            1 - 2*(qy*qy + qz*qz),
+//            2*(qx*qy + qw*qz),
+//            2*(qx*qz - qw*qy),
+//        };
+
+        // NOTE: Computes rotation of y-axis by quaternion.
+        Eigen::Vector3<T> nor = {
+                2*(qx*qy - qw*qz),
+                1 - 2*(qx*qx + qz*qz),
+                2*(qy*qz + qx*qw),
+        };
+
+        T d = nor.x()*qx + nor.y()*qy + nor.z()*qz;
+        T twist = 2*atan2(d, qw);
+
+        return {
+            nor.x(), nor.y(), nor.z(), twist
+        };
+    }
 };
 
 

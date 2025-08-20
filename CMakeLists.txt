@@ -91,7 +91,8 @@ add_executable(viper main.cpp viper_ui.h viper_ui.cpp viper_usb.h viper_usb.cpp 
         MeshReconstruction.cpp
         MeshReconstruction.hpp
         FoxgloveUtility.cpp
-        FoxgloveUtility.hpp)
+        FoxgloveUtility.hpp
+        FoxgloveMacros.hpp)
 # VPif.h VPif.cpp VPcmdDefs.h
 
 # Include libusb headers

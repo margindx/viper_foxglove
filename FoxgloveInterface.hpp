@@ -13,6 +13,7 @@
 #include <Eigen/Dense>
 
 #include "FoxgloveUtility.hpp"
+#include "FoxgloveMacros.hpp"
 
 #include <thread>
 #include <optional>
@@ -49,7 +50,16 @@ namespace mdx {
 
             Eigen::Vector3<T> unitVec{1, 0, 0};
 
-            Eigen::Vector3<T> nor = quat.toRotationMatrix() * unitVec;
+            T qx = static_cast<T>(pose.pose->orientation.value().x);
+            T qy = static_cast<T>(pose.pose->orientation.value().y);
+            T qz = static_cast<T>(pose.pose->orientation.value().z);
+            T qw = static_cast<T>(pose.pose->orientation.value().w);
+
+            Eigen::Vector3<T> nor = {
+                1 - 2*(qy*qy + qz*qz),
+                2*(qx*qy + qw*qz),
+                2*(qx*qz - qw*qy),
+            };
 
             return {
                 pos.x(),
@@ -100,8 +110,16 @@ namespace mdx {
         float contactDuration = 0; /// Contact duration in milliseconds
     };
 
+    struct SwingTwist {
+        double nx;
+        double ny;
+        double nz;
+        double twist;
+    };
+
     NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RawForce, f1, f2, f3, f4)
     NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Contact, hasContact, contactDuration)
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SwingTwist, nx, ny, nz, twist)
 
     constexpr char kViperLogChannelName[] = "/viper/log";
     constexpr char kViperTFChannelName[] = "/tf/viper";
@@ -113,6 +131,7 @@ namespace mdx {
     constexpr char kViperPosesHistoryChannelName[] = "/viper/poses/1/history";
     constexpr char kHandheldForcesRawChannelName[] = "/hh/forces/raw";
     constexpr char kHandheldForcesContactChannelName[] = "/hh/forces/contact";
+    constexpr char kHandheldSwingTwistChannelName[] = "/hh/swing_twist";
     constexpr char kHandheldSceneChannelName[] = "/hh/scene";
 }
 
@@ -138,11 +157,23 @@ class FoxgloveInterface {
     std::optional<foxglove::RawChannel> contactChannel_;
     std::optional<foxglove::Schema> contactSchema_;
 
+    std::optional<foxglove::RawChannel> swingTwistChannel_;
+    std::optional<foxglove::Schema> swingTwistSchema_;
+
     foxglove::McapWriterOptions mcapOptions_;
     std::optional<foxglove::McapWriter> mcapWriter_;
 
     std::vector<mdx::Point6f> pointsAll_;
     std::vector<mdx::Point6f> pointsContact_;
+
+    std::mutex swingTwistMtx_;
+    mdx::SwingTwist swingTwist_;
+
+    std::mutex contactMtx_;
+    mdx::Contact contact_;
+
+    std::mutex rawForceMtx_;
+    mdx::RawForce rawForce_;
 
     void initRawChannels() {
         {
@@ -186,6 +217,26 @@ class FoxgloveInterface {
             }
             contactChannel_.emplace(std::move(contactSchemaChannelResult.value()));
         }
+
+        {
+            json swingTwistSchema = jsonschema::generate_schema<mdx::SwingTwist>();
+            foxglove::Schema schema;
+            schema.name = "SwingTwist";
+            schema.encoding = "jsonschema";
+            std::string schema_data = swingTwistSchema.dump();
+            schema.data = reinterpret_cast<const std::byte*>(schema_data.data());
+            schema.data_len = schema_data.size();
+            swingTwistSchema_.emplace(schema);
+
+            auto swingTwistSchemaChannelResult = foxglove::RawChannel::create(mdx::kHandheldSwingTwistChannelName, "json", schema, context_);
+            if (!swingTwistSchemaChannelResult.has_value()) {
+                std::stringstream ss;
+                ss << "Failed to create SwingTwist channel: " << foxglove::strerror(swingTwistSchemaChannelResult.error()) << std::endl;
+                std::cerr << ss.str();
+                throw std::runtime_error(ss.str());
+            }
+            swingTwistChannel_.emplace(std::move(swingTwistSchemaChannelResult.value()));
+        }
     }
 
     void initMcap(std::string &&path="viper.mcap") {
@@ -207,7 +258,7 @@ class FoxgloveInterface {
     void initServer() {
         wsOptions_ = foxglove::WebSocketServerOptions{};
         wsOptions_.context = context_;
-//        foxglove::WebSocketServerCapabilities::
+        wsOptions_.capabilities = foxglove::WebSocketServerCapabilities::Time;
 
         auto serverResult = foxglove::WebSocketServer::create(std::move(wsOptions_));
         if (!serverResult.has_value()) {
@@ -218,94 +269,16 @@ class FoxgloveInterface {
         }
         server_.emplace(std::move(serverResult.value()));
 
-        auto logChannelResult = foxglove::schemas::LogChannel::create(mdx::kViperLogChannelName, context_);
-        if (!logChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create log channel: " << foxglove::strerror(logChannelResult.error()) << std::endl;
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        logChannel_.emplace(std::move(logChannelResult.value()));
+        FOXGLOVE_INIT_CHANNEL(Log, ViperLog, logChannel_);
 
-        auto sceneChannelResult = foxglove::schemas::SceneUpdateChannel::create(mdx::kHandheldSceneChannelName, context_);
-        if (!sceneChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create scene channel: " << foxglove::strerror(sceneChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        sceneChannel_.emplace(std::move(sceneChannelResult.value()));
-
-        auto poseChannelResult = foxglove::schemas::PoseInFrameChannel::create(mdx::kHandheldPoseChannelName, context_);
-        if (!poseChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create handheld pose channel: " << foxglove::strerror(poseChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        poseChannel_.emplace(std::move(poseChannelResult.value()));
-
-        auto posesInFrameChannelResult = foxglove::schemas::PosesInFrameChannel::create(mdx::kViperPosesChannelName, context_);
-        if (!posesInFrameChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create poses in frame channel: " << foxglove::strerror(posesInFrameChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        posesInFrameChannel_.emplace(std::move(posesInFrameChannelResult.value()));
-
-        auto hhPosesInFrameChannelResult = foxglove::schemas::PosesInFrameChannel::create(mdx::kViperPosesHistoryChannelName, context_);
-        if (!hhPosesInFrameChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create poses in frame channel: " << foxglove::strerror(hhPosesInFrameChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        hhPosesChannel_.emplace(std::move(hhPosesInFrameChannelResult.value()));
-
-        auto hhPointsContactChannelResult = foxglove::schemas::PointCloudChannel::create(mdx::kHandheldPointCloudContactChannelName, context_);
-        if (!hhPointsContactChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create handheld pointcloud (contact) in frame channel: " << foxglove::strerror(hhPointsContactChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        hhPointsContactChannel_.emplace(std::move(hhPointsContactChannelResult.value()));
-
-        auto hhPointsAllChannelResult = foxglove::schemas::PointCloudChannel::create(mdx::kHandheldPointCloudAllChannelName, context_);
-        if (!hhPointsAllChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create handheld pointcloud (all) in frame channel: " << foxglove::strerror(hhPointsAllChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        hhPointsAllChannel_.emplace(std::move(hhPointsAllChannelResult.value()));
-
-        auto viperTransformChannelResult = foxglove::schemas::FrameTransformChannel::create(mdx::kViperTFChannelName, context_);
-        if (!viperTransformChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create viper transform channel: " << foxglove::strerror(viperTransformChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        viperTransformChannel_.emplace(std::move(viperTransformChannelResult.value()));
-
-        auto worldTransformChannelResult = foxglove::schemas::FrameTransformChannel::create(mdx::kWorldTFChannelName, context_);
-        if (!worldTransformChannelResult.has_value()) {
-            std::stringstream ss;
-            ss << "Failed to create world transform channel: " << foxglove::strerror(worldTransformChannelResult.error()) << std::endl;
-            logError(ss.str());
-            std::cerr << ss.str();
-            throw std::runtime_error(ss.str());
-        }
-        worldTransformChannel_.emplace(std::move(worldTransformChannelResult.value()));
+        FOXGLOVE_INIT_CHANNEL_LOGGED(SceneUpdate, HandheldScene, sceneChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(PoseInFrame, HandheldPose, poseChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(PosesInFrame, ViperPoses, posesInFrameChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(PosesInFrame, ViperPosesHistory, hhPosesChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(PointCloud, HandheldPointCloudContact, hhPointsContactChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(PointCloud, HandheldPointCloudAll, hhPointsAllChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(FrameTransform, ViperTF, viperTransformChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(FrameTransform, WorldTF, worldTransformChannel_, logError);
     }
 public:
     explicit FoxgloveInterface(std::string &&path="viper.mcap") {
@@ -324,7 +297,7 @@ public:
                    const foxglove::schemas::PackedElementField::NumericType numericType = foxglove::utility::NumericType<T>::type) {
         foxglove::schemas::PointCloud pc;
         pc.pose.emplace();
-        pc.pose.value().orientation->w = 1;
+//        pc.pose.value().orientation->w = 1;
 
         pc.frame_id = "viper";
         pc.point_stride = 6 * 4;
@@ -416,16 +389,37 @@ public:
     }
 
     void logRawForce(mdx::RawForce &rawForce) {
+        {
+            std::lock_guard<std::mutex> guard_{rawForceMtx_};
+            rawForce_ = rawForce;
+        }
+
         json msg = rawForce;
         auto json_val = msg.dump();
         rawForceChannel_.value().log(reinterpret_cast<const std::byte*>(json_val.c_str()), json_val.size());
     }
 
     void logContact(const mdx::Contact &contact) {
+        {
+            std::lock_guard<std::mutex> guard_{contactMtx_};
+            contact_ = contact;
+        }
+
         hasContact = contact.hasContact;
         json msg = contact;
         auto json_val = msg.dump();
         contactChannel_.value().log(reinterpret_cast<const std::byte*>(json_val.c_str()), json_val.size());
+    }
+
+    void logSwingTwist(const mdx::SwingTwist &swingTwist) {
+        {
+            std::lock_guard<std::mutex> guard_{swingTwistMtx_};
+            swingTwist_ = swingTwist;
+        }
+
+        json msg = swingTwist;
+        auto json_val = msg.dump();
+        swingTwistChannel_.value().log(reinterpret_cast<const std::byte*>(json_val.c_str()), json_val.size());
     }
 
     void logMessage(const std::string &message, foxglove::schemas::Log::LogLevel level) {
