@@ -23,6 +23,38 @@
 using namespace std::literals::chrono_literals;
 
 namespace mdx {
+    /// @brief A channel advertised by a client.
+    struct ClientChannel {
+        /// @brief The ID of the channel.
+        uint32_t id;
+        /// @brief The topic of the channel.
+        std::string topic;
+        /// @brief The encoding of the channel.
+        std::string encoding;
+        /// @brief The name of the schema of the channel.
+        std::string schema_name;
+        /// @brief The encoding of the schema of the channel.
+        std::string schema_encoding;
+        /// @brief The schema of the channel.
+        std::vector<std::byte> schema;
+        /// @brief The length of the schema of the channel.
+        size_t schema_len;
+
+        ClientChannel() {}
+
+        ClientChannel(const foxglove::ClientChannel& channel) {
+            this->id = channel.id;
+            this->topic = std::string(channel.topic);
+            this->encoding = std::string(channel.encoding);
+            this->schema_name = std::string(channel.schema_name);
+            this->schema_encoding = std::string(channel.schema_encoding);
+            if (channel.schema && channel.schema_len > 0) {
+                this->schema = std::vector<std::byte>(channel.schema, channel.schema + channel.schema_len);
+            }
+            this->schema_len = channel.schema_len;
+        }
+    };
+
     struct Point3 {
         float x;
         float y;
@@ -175,6 +207,11 @@ class FoxgloveInterface {
     std::mutex rawForceMtx_;
     mdx::RawForce rawForce_;
 
+    std::mutex channelMapMtx_;
+    /// Hash table mapping a (client_id, client_channel_id) pair to ClientChannel
+    typedef std::map<std::pair<uint32_t, uint32_t>, mdx::ClientChannel> ClientChannelMap;
+    std::shared_ptr<ClientChannelMap> channelMap_;
+
     void initRawChannels() {
         {
             json rawForceSchema = jsonschema::generate_schema<mdx::RawForce>();
@@ -257,8 +294,46 @@ class FoxgloveInterface {
 
     void initServer() {
         wsOptions_ = foxglove::WebSocketServerOptions{};
+        wsOptions_.name = "mdx";
         wsOptions_.context = context_;
-        wsOptions_.capabilities = foxglove::WebSocketServerCapabilities::Time;
+
+        channelMap_ = std::make_shared<ClientChannelMap>();
+        std::function onMessageData = [&](uint32_t client_id, uint32_t client_channel_id, const std::byte *data, size_t data_len) {
+            mdx::ClientChannel channel;
+            {
+                std::lock_guard<std::mutex> guard{channelMapMtx_};
+                channel = channelMap_->operator[]({client_id, client_channel_id});
+            }
+            std::cout << "Received message from (" << client_id << ", " << client_channel_id << ") with topic " <<
+            channel.topic << " and schema " << channel.schema_name << " with encoding " <<
+            channel.encoding << " and schema encoding " << channel.schema_encoding << " with schema length " << channel.schema_len << std::endl;
+        };
+
+        std::function onClientAdvertise = [&](uint32_t client_id, const foxglove::ClientChannel &channel) {
+            std::cout << "Received client channel advertisement with pair (" << client_id << ", " << channel.id << ") with topic " << channel.topic << std::endl;
+            {
+                std::lock_guard<std::mutex> guard{channelMapMtx_};
+                foxglove::ClientChannel c{channel};
+                channelMap_->operator[]({client_id, channel.id}) = c;
+            }
+        };
+
+        std::function onClientUnadvertise = [&](uint32_t client_id, uint32_t client_channel_id) {
+            std::cout << "Received client channel uadvertisement with pair (" << client_id << ", " << client_channel_id << ")" << std::endl;
+            {
+                std::lock_guard<std::mutex> guard{channelMapMtx_};
+                channelMap_->erase({client_id, client_channel_id});
+            }
+        };
+        wsOptions_.callbacks.onMessageData = onMessageData;
+        wsOptions_.callbacks.onClientAdvertise = onClientAdvertise;
+        wsOptions_.callbacks.onClientUnadvertise = onClientUnadvertise;
+        wsOptions_.supported_encodings.emplace_back("json");
+        wsOptions_.supported_encodings.emplace_back("protobuf");
+        wsOptions_.capabilities =
+            foxglove::WebSocketServerCapabilities::Time |
+            foxglove::WebSocketServerCapabilities::ClientPublish |
+            foxglove::WebSocketServerCapabilities::Services;
 
         auto serverResult = foxglove::WebSocketServer::create(std::move(wsOptions_));
         if (!serverResult.has_value()) {
