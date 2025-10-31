@@ -1,4 +1,4 @@
-from foxglove2zmq import FoxgloveToZMQPushRelay
+from foxglove2zmq import FoxgloveToZMQPushRelay, FoxgloveToZMQPubSubRelay
 import asyncio
 
 if __name__ == "__main__":

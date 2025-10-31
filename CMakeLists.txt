@@ -60,10 +60,10 @@ add_executable(viper main.cpp viper_ui.h viper_ui.cpp viper_usb.h viper_usb.cpp 
 # VPif.h VPif.cpp VPcmdDefs.h
 
 # Include libusb headers
-target_include_directories(viper PRIVATE ${LIBUSB_INCLUDE_DIRS} ${ZEROMQ_INCLUDE_DIRS} ${RAYLIB_INCLUDE_DIRS})
+target_include_directories(viper PRIVATE ${LIBUSB_INCLUDE_DIRS})
 
 # Link libusb libraries
-target_link_libraries(viper PRIVATE ${LIBUSB_LIBRARIES} pthread ${ZEROMQ_LIBRARIES} ${RAYLIB_LIBRARIES})
+target_link_libraries(viper PRIVATE ${LIBUSB_LIBRARIES} pthread)
 
 # Add include directory for Foxglove SDK
 target_include_directories(viper PRIVATE ${foxglove_SOURCE_DIR}/include)

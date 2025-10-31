@@ -63,6 +63,8 @@ void launchFoxglove() {
         if (counter % 300 == 0) {
             viper.initTransforms();
             fgInterface.publishPointClouds();
+            // These functions below are broken for now
+            // Refer to https://github.com/helkebir/cavitary instead.
 //            fgInterface.publishMesh();
 //            fgInterface.publishMeshModel();
             fgInterface.logDebug("Updated point clouds");
