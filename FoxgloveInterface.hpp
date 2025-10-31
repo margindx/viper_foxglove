@@ -15,6 +15,7 @@
 #include "FoxgloveUtility.hpp"
 #include "FoxgloveMacros.hpp"
 #include "DynamicProtobufDecoder.hpp"
+#include "MeshReconstruction.hpp"
 
 #include <thread>
 #include <optional>
@@ -76,10 +77,14 @@ namespace mdx {
     using Point6d = Point6<double>;
     using Point6f = Point6<float>;
 
+    // A helper struct to perform the conversion using templates.
+    // This struct has an implicitly converting constructor that takes a
+    // std::vector<Point6<T>> and returns a pair of Eigen::Map objects.
     template <typename T>
     struct Point6View {
         // The type for our points map, which is a 3-column matrix with a custom stride.
-        using PointsMap = Eigen::Map<const Eigen::Matrix<T, -1, 3, Eigen::RowMajor>, Eigen::Unaligned, Eigen::OuterStride<1>>;
+        // The stride must be 6 to skip to the next point in memory.
+        using PointsMap = Eigen::Map<const Eigen::Matrix<T, -1, 3, Eigen::RowMajor>, Eigen::Unaligned, Eigen::OuterStride<6>>;
 
         // The type for our normals map, which is also a 3-column matrix with a custom stride.
         // The stride is 6, since we need to jump over the x, y, z components of the point.
@@ -95,6 +100,9 @@ namespace mdx {
         PointsMap points;
         NormalsMap normals;
     };
+
+    using Point6dView = Point6View<double>;
+    using Point6fView = Point6View<float>;
 
     struct RawForce {
         float f1;
@@ -125,6 +133,7 @@ namespace mdx {
     constexpr char kViperLogChannelName[] = "/viper/log";
     constexpr char kViperTFChannelName[] = "/tf/viper";
     constexpr char kWorldTFChannelName[] = "/tf/world";
+    constexpr char kAnatomicalTFChannelName[] = "/tf/anatomical";
     constexpr char kHandheldPoseChannelName[] = "/hh/pose";
     constexpr char kHandheldPointCloudContactChannelName[] = "/hh/points/contact";
     constexpr char kHandheldPointCloudAllChannelName[] = "/hh/points/all";
@@ -134,6 +143,8 @@ namespace mdx {
     constexpr char kHandheldForcesContactChannelName[] = "/hh/forces/contact";
     constexpr char kHandheldSwingTwistChannelName[] = "/hh/swing_twist";
     constexpr char kHandheldSceneChannelName[] = "/hh/scene";
+    constexpr char kSceneAnatomicalChannelName[] = "/scene/anatomical";
+    constexpr char kSceneAnatomicalBboxChannelName[] = "/scene/anatomical/bbox";
 }
 
 class FoxgloveInterface {
@@ -151,6 +162,10 @@ class FoxgloveInterface {
 
     std::optional<foxglove::schemas::FrameTransformChannel> viperTransformChannel_;
     std::optional<foxglove::schemas::FrameTransformChannel> worldTransformChannel_;
+    std::optional<foxglove::schemas::FrameTransformChannel> anatomicalTransformChannel_;
+
+    std::optional<foxglove::schemas::SceneUpdateChannel> sceneAnatomicalChannel_;
+    std::optional<foxglove::schemas::CubePrimitiveChannel> sceneAnatomicalBboxChannel_;
 
     std::optional<foxglove::RawChannel> rawForceChannel_;
     std::optional<foxglove::Schema> rawForceSchema_;
@@ -164,8 +179,15 @@ class FoxgloveInterface {
     foxglove::McapWriterOptions mcapOptions_;
     std::optional<foxglove::McapWriter> mcapWriter_;
 
-    std::vector<mdx::Point6f> pointsAll_;
-    std::vector<mdx::Point6f> pointsContact_;
+    std::mutex pointsAllMtx_, pointsContactMtx_;
+    std::vector<mdx::Point6d> pointsAll_;
+    std::vector<mdx::Point6d> pointsContact_;
+
+    std::mutex meshMtx_;
+    std::shared_ptr<open3d::geometry::TriangleMesh> mesh_;
+
+    std::mutex modelMtx_;
+    std::shared_ptr<std::vector<std::byte>> model_;
 
     std::mutex swingTwistMtx_;
     mdx::SwingTwist swingTwist_;
@@ -282,6 +304,13 @@ class FoxgloveInterface {
             // TODO: Make thread-safe
             auto& decoder_ptr = decoderMap_.at(channel.schema_name);
             auto message = decoder_ptr->decode(data, data_len);
+            if (channel.topic == mdx::kSceneAnatomicalBboxChannelName) {
+                auto bbox = decodeMessage<foxglove::schemas::CubePrimitive>(*message);
+                publishBboxToAnatomicalScene(bbox);
+            } else if (channel.topic == mdx::kAnatomicalTFChannelName) {
+                auto tf = decodeMessage<foxglove::schemas::FrameTransform>(*message);
+                publishAnatomicalTransform(tf);
+            }
             printDecodedMessage(*message);
         };
 
@@ -297,7 +326,7 @@ class FoxgloveInterface {
         };
 
         std::function onClientUnadvertise = [&](uint32_t client_id, uint32_t client_channel_id) {
-            std::cout << "Received client channel uadvertisement with pair (" << client_id << ", " << client_channel_id << ")" << std::endl;
+            std::cout << "Received client channel unadvertisement with pair (" << client_id << ", " << client_channel_id << ")" << std::endl;
             {
                 std::lock_guard<std::mutex> guard{channelMapMtx_};
                 channelMap_->erase({client_id, client_channel_id});
@@ -332,6 +361,9 @@ class FoxgloveInterface {
         FOXGLOVE_INIT_CHANNEL_LOGGED(PointCloud, HandheldPointCloudAll, hhPointsAllChannel_, logError);
         FOXGLOVE_INIT_CHANNEL_LOGGED(FrameTransform, ViperTF, viperTransformChannel_, logError);
         FOXGLOVE_INIT_CHANNEL_LOGGED(FrameTransform, WorldTF, worldTransformChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(FrameTransform, AnatomicalTF, anatomicalTransformChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(SceneUpdate, SceneAnatomical, sceneAnatomicalChannel_, logError);
+        FOXGLOVE_INIT_CHANNEL_LOGGED(CubePrimitive, SceneAnatomicalBbox, sceneAnatomicalBboxChannel_, logError);
     }
 public:
     explicit FoxgloveInterface(std::string &&path="viper.mcap") {
@@ -353,7 +385,7 @@ public:
 //        pc.pose.value().orientation->w = 1;
 
         pc.frame_id = "viper";
-        pc.point_stride = 6 * 4;
+        pc.point_stride = 6 * sizeof(T);
 
         foxglove::schemas::PackedElementField xField, yField, zField;
         xField.name = 'x';
@@ -381,7 +413,7 @@ public:
         nzField.type = numericType;
         nzField.offset = 5*sizeof(T);
 
-        std::vector<foxglove::schemas::PackedElementField> fields{xField, yField, zField, nxField, nyField, nzField};
+        std::vector fields{xField, yField, zField, nxField, nyField, nzField};
 
         pc.fields = fields;
 
@@ -432,13 +464,60 @@ public:
     void publishPointClouds() {
         auto timestamp = getTimestamp();
 
-        auto pcAll = *makePointCloud(pointsAll_, foxglove::schemas::PackedElementField::NumericType::FLOAT32);
+        auto pcAll = *makePointCloud(pointsAll_);
         pcAll.timestamp = timestamp;
         hhPointsAllChannel_.value().log(pcAll);
 
         auto pcContact = *makePointCloud(pointsContact_);
         pcContact.timestamp = timestamp;
         hhPointsContactChannel_.value().log(pcContact);
+    }
+
+    void publishMesh() {
+//        mdx::Point6dView pointView{pointsContact_};
+        mdx::Point6dView pointView{pointsAll_};
+        auto mesh = mdx::geometry::CreateMesh(pointView.points, pointView.normals);
+
+        {
+            std::lock_guard<std::mutex> guard{meshMtx_};
+            mesh_ = mesh;
+        }
+
+        auto meshSerializedGlb = mdx::geometry::SerializeMesh(mesh, mdx::geometry::FileFormat3D::GLB);
+        auto meshSerializedGltf = mdx::geometry::SerializeMesh(mesh, mdx::geometry::FileFormat3D::GLTF);
+
+        {
+            std::lock_guard<std::mutex> guard{modelMtx_};
+            model_ = meshSerializedGlb;
+        }
+
+        foxglove::schemas::ModelPrimitive model, modelGltf;
+        model.data = *meshSerializedGlb;
+        model.media_type = "model/gltf-binary";
+        model.pose.emplace();
+
+        modelGltf.data = *meshSerializedGltf;
+        modelGltf.media_type = "model/gltf+json";
+        modelGltf.pose.emplace();
+    }
+
+    void publishMeshModel() {
+        foxglove::schemas::ModelPrimitive model;
+        {
+            std::lock_guard<std::mutex> guard{modelMtx_};
+            model.data = *model_;
+        }
+        model.media_type = "model/gltf-binary";
+        model.pose.emplace();
+
+        foxglove::schemas::SceneEntity entity;
+        entity.models.push_back(model);
+        entity.id = "mesh";
+
+        foxglove::schemas::SceneUpdate sceneUpdate;
+        sceneUpdate.entities.push_back(entity);
+
+        sceneChannel_.value().log(sceneUpdate);
     }
 
     void logRawForce(mdx::RawForce &rawForce) {
@@ -510,6 +589,10 @@ public:
         worldTransformChannel_.value().log(tf);
     }
 
+    void publishAnatomicalTransform(foxglove::schemas::FrameTransform &tf) {
+        anatomicalTransformChannel_.value().log(tf);
+    }
+
     void publishLineToScene(foxglove::schemas::LinePrimitive &line, std::string &&lineName="handheld") {
         foxglove::schemas::SceneEntity entity;
         entity.id = lineName;
@@ -533,6 +616,18 @@ public:
         sceneChannel_.value().log(sceneUpdate);
     }
 
+    void publishBboxToAnatomicalScene(foxglove::schemas::CubePrimitive &bbox) {
+        foxglove::schemas::SceneEntity entity;
+        entity.id = "bbox";
+        entity.cubes.push_back(bbox);
+        entity.frame_id = "viper";
+
+        foxglove::schemas::SceneUpdate sceneUpdate;
+        sceneUpdate.entities.push_back(entity);
+
+        sceneChannel_.value().log(sceneUpdate);
+    }
+
     void publishPoses(foxglove::schemas::PosesInFrame &poses) {
         posesInFrameChannel_.value().log(poses);
     }
@@ -542,11 +637,15 @@ public:
     }
 
     void publishPose(foxglove::schemas::PoseInFrame &pose) {
-        auto pointMdx = mdx::Point6f::fromPose(pose);
+        auto pointMdx = mdx::Point6d::fromPose(pose);
 
-        pointsAll_.push_back(pointMdx);
+        {
+            std::lock_guard<std::mutex> guard{pointsAllMtx_};
+            pointsAll_.push_back(pointMdx);
+        }
 
         if (hasContact) {
+            std::lock_guard<std::mutex> guard{pointsContactMtx_};
             pointsContact_.push_back(pointMdx);
         }
 

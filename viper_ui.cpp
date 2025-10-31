@@ -479,7 +479,6 @@ SensorData viper_ui::pno_record_to_SensorData(SENFRAMEDATA *pfd) {
 void viper_ui::publish_pno_record(SENFRAMEDATA *pfd) {
     SensorData data = pno_record_to_SensorData(pfd);
 
-    ZMQServer::publishSensorData(data);
 }
 
 void viper_ui::publish_cont(viper_usb *pvpr, bool slow) {
@@ -535,8 +534,6 @@ void viper_ui::publish_cont(viper_usb *pvpr, bool slow) {
 }
 
 uint32_t viper_ui::start_continuous_publish(viper_usb *pvpr, bool slow) {
-    ZMQServer::init(5555, ZMQServer::Publisher);
-
     uint8_t cmd_pkg[32];
     uint8_t resp_pkg[32];
     uint32_t crc;

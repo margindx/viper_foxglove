@@ -127,7 +127,7 @@ public:
     }
 
     void initTransforms() {
-        worldFrameTransform_.child_frame_id = "world";
+        worldFrameTransform_.parent_frame_id = "world";
         fgInterface_->publishWorldTransform(worldFrameTransform_);
 
         viperFrameTransform_.parent_frame_id = "world";

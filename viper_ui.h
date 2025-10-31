@@ -8,7 +8,6 @@
 #include "ViperInterface.h"
 #include <cstdint>
 
-#include "ZMQServer.hpp"
 #include "SensorData.hpp"
 
 

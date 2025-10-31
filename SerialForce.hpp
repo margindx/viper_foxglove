@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <iostream>
 #include <thread>
+#include <functional>
 #include "FoxgloveInterface.hpp"
 
 class SerialForce {
@@ -24,6 +25,8 @@ protected:
 
     FoxgloveInterface *fgInterface_;
     std::thread continuousPublishThread_;
+
+    std::optional<std::function<bool(mdx::RawForce &)>> hasContactCallback_;
 
     void updateForces_() {
         while (!closed) {
@@ -44,7 +47,7 @@ protected:
     void updateContact_(mdx::RawForce &rawForce) {
         auto now = std::chrono::system_clock::now();
 
-        if (rawForce.f4 > 0.8) {
+        if (hasContactCallback_.value()(rawForce)) {
             std::lock_guard<std::mutex> guardContact{contactMutex_};
             if (lastContactTime_.has_value()) {
                 auto dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - lastContactTime_.value()).count();
@@ -65,7 +68,7 @@ protected:
         fgInterface_->logContact(contact_);
     }
 public:
-    SerialForce(FoxgloveInterface &fgInterface) : fgInterface_(&fgInterface) {
+    SerialForce(FoxgloveInterface &fgInterface) : fgInterface_(&fgInterface), contact_{} {
 
     }
 
@@ -73,11 +76,22 @@ public:
         close();
     }
 
+    void setContactCallback(std::function<bool(mdx::RawForce &)> callback) {
+        hasContactCallback_ = callback;
+    }
+
     void init(std::string &&port = "/dev/cu.usbmodem2101") {
         auto serialRes = openSerial(std::move(port));
         if (!serialRes) {
             fgInterface_->logError("Failed to open force sensor serial port");
         }
+
+        if (!hasContactCallback_.has_value()) {
+            hasContactCallback_ = [](mdx::RawForce &rawForce) {
+                return rawForce.f4 > 0.3;
+            };
+        }
+
         startForceUpdate();
     }
 
@@ -141,8 +155,8 @@ public:
         return {
             getF1(),
             getF2(),
-            getF3(),
-            getF4()
+           getF3(),
+           getF4()
         };
     }
 };

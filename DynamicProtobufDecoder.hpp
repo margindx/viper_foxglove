@@ -146,5 +146,15 @@ void recursivePrint(const google::protobuf::Message& message, std::stringstream&
 // Generic function to pretty-print any decoded protobuf message.
 void printDecodedMessage(const google::protobuf::Message& message);
 
+// Generic template (default case)
+template<typename T>
+T decodeMessage(const google::protobuf::Message& message) {
+    std::cout << "No specific decoder for type. Printing generic representation:\n";
+    printDecodedMessage(message);
+    // For a generic case, we can't return a specific type 'T',
+    // so we'll just return a default-constructed one.
+    return T{};
+}
+
 
 #endif //VIPER_DYNAMICPROTOBUFDECODER_HPP
