@@ -5,7 +5,7 @@
 #ifndef VIPER_MESHRECONSTRUCTION_HPP
 #define VIPER_MESHRECONSTRUCTION_HPP
 
-#include <open3D/Open3D.h>
+#include <open3d/Open3D.h>
 #include "open3d/t/geometry/RaycastingScene.h"
 #include "open3d/t/geometry/TriangleMesh.h"
 #include "open3d/core/CUDAUtils.h" // For checking CUDA availability

@@ -101,7 +101,7 @@ public:
     std::unique_ptr<google::protobuf::Message> decodeProtobuf(const std::byte* data, const size_t data_len) {
         std::unique_ptr<google::protobuf::Message> message(m_prototype->New());
         if (!message->ParseFromArray(data, data_len)) {
-            throw std::runtime_error("Failed to parse binary payload for message type '" + m_message_descriptor->full_name() + "'.");
+            throw std::runtime_error("Failed to parse binary payload for message type '" + std::string(m_message_descriptor->full_name()) + "'.");
         }
         return message;
     }

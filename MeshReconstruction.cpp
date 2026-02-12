@@ -50,7 +50,8 @@ std::pair<std::shared_ptr<open3d::geometry::TriangleMesh>, std::vector<double>>
 mdx::geometry::PoissonReconstruction(std::shared_ptr<open3d::geometry::PointCloud> pcd, int depth) {
 
     // Perform Poisson reconstruction, returning the mesh and vertex densities.
-    return open3d::geometry::TriangleMesh::CreateFromPointCloudPoisson(*pcd, depth);
+    auto [mesh, densities] = open3d::geometry::TriangleMesh::CreateFromPointCloudPoisson(*pcd, depth);
+    return {mesh, densities};
 }
 
 std::shared_ptr<open3d::geometry::TriangleMesh>
