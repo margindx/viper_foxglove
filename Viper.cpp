@@ -192,9 +192,9 @@ void Viper::pnoToPoseInFrame(SENFRAMEDATA *pfd, flatbuffers::FlatBufferBuilder &
     // foxglove position
     auto pos = foxglove::CreateVector3(
         builder,
-        pfd->pno.pos[0] / 100.f,
-        pfd->pno.pos[1] / 100.f,
-        pfd->pno.pos[2] / 100.f
+        pfd->pno.pos[0],
+        pfd->pno.pos[1],
+        pfd->pno.pos[2]
     );
 
     // foxglove orientation
@@ -250,9 +250,9 @@ void Viper::pnoToPosesInFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, flatbuff
         // foxglove position
         auto pos = foxglove::CreateVector3(
                 builder,
-                pfd->pno.pos[0] / 100.f,
-                pfd->pno.pos[1] / 100.f,
-                pfd->pno.pos[2] / 100.f
+                pfd->pno.pos[0],
+                pfd->pno.pos[1],
+                pfd->pno.pos[2]
         );
 
         // foxglove orientation
@@ -309,9 +309,9 @@ SENFRAMEDATA *Viper::pnoTransformInBodyFrame(SENFRAMEDATA *pfd) {
 //    pfd->pno.pos[0] = pos.x() + rotatedOffset.x();
 //    pfd->pno.pos[1] = pos.y() + rotatedOffset.y();
 //    pfd->pno.pos[2] = pos.z() + rotatedOffset.z();
-    pfd->pno.pos[0] /= 100.f;
-    pfd->pno.pos[1] /= 100.f;
-    pfd->pno.pos[2] /= 100.f;
+    pfd->pno.pos[0];
+    pfd->pno.pos[1];
+    pfd->pno.pos[2];
 
     return pfd;
 }

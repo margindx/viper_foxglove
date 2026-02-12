@@ -1882,7 +1882,7 @@ public:
 		memcpy(this, &Default, sizeof(UNITS_CONFIG));
 	}
 
-	void Fill(uint32_t pos = POS_INCH, uint32_t ori = ORI_QUATERNION)
+	void Fill(uint32_t pos = POS_METER, uint32_t ori = ORI_QUATERNION)
 	{
 		pos_units = pos;
 		ori_units = ori;
