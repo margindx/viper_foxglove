@@ -7,16 +7,74 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 find_package(Open3D REQUIRED)
 find_package(Protobuf REQUIRED CONFIG)
 
-# Fetch Foxglove SDK
+# Fetch Foxglove SDK - automatically select based on OS and architecture
 include(FetchContent)
-FetchContent_Declare(
+
+# Detect platform and set appropriate Foxglove SDK URL and hash
+set(FOXGLOVE_VERSION "0.10.0")
+set(FOXGLOVE_BASE_URL "https://github.com/foxglove/foxglove-sdk/releases/download/sdk/v${FOXGLOVE_VERSION}")
+
+# Normalize architecture names
+set(FOXGLOVE_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+if(FOXGLOVE_ARCH STREQUAL "arm64")
+    set(FOXGLOVE_ARCH "aarch64")
+elseif(FOXGLOVE_ARCH MATCHES "^(x86_64|amd64|AMD64)$")
+    set(FOXGLOVE_ARCH "x86_64")
+endif()
+
+# Determine platform string and SHA256 hash
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    # macOS
+    if(FOXGLOVE_ARCH STREQUAL "aarch64")
+        set(FOXGLOVE_PLATFORM "aarch64-apple-darwin")
+        set(FOXGLOVE_SHA256 "14ded1c5c0e8386cd8c8b9371ae99852131883f69f62500ec6c987daf23f0724")
+    elseif(FOXGLOVE_ARCH STREQUAL "x86_64")
+        set(FOXGLOVE_PLATFORM "x86_64-apple-darwin")
+        set(FOXGLOVE_SHA256 "REPLACE_WITH_ACTUAL_SHA256_FOR_MACOS_X86_64")
+    else()
+        message(FATAL_ERROR "Unsupported macOS architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Linux
+    if(FOXGLOVE_ARCH STREQUAL "x86_64")
+        set(FOXGLOVE_PLATFORM "x86_64-unknown-linux-gnu")
+        set(FOXGLOVE_SHA256 "209d34a8703d44a129c559493e1a3fb215888b4d5973622750ac28b1c345946c")
+    elseif(FOXGLOVE_ARCH STREQUAL "aarch64")
+        set(FOXGLOVE_PLATFORM "aarch64-unknown-linux-gnu")
+        set(FOXGLOVE_SHA256 "REPLACE_WITH_ACTUAL_SHA256_FOR_LINUX_AARCH64")
+    else()
+        message(FATAL_ERROR "Unsupported Linux architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+else()
+    message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}")
+endif()
+
+# Construct full URL
+set(FOXGLOVE_URL "${FOXGLOVE_BASE_URL}/foxglove-v${FOXGLOVE_VERSION}-cpp-${FOXGLOVE_PLATFORM}.zip")
+
+message(STATUS "Detected platform: ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}")
+message(STATUS "Downloading Foxglove SDK from: ${FOXGLOVE_URL}")
+
+# Check if SHA256 needs to be updated
+if(FOXGLOVE_SHA256 MATCHES "^REPLACE_WITH_ACTUAL_SHA256")
+    # Allow build to continue without hash verification (not recommended for production)
+    message(WARNING "SHA256 hash not set for ${FOXGLOVE_PLATFORM}. Please download manually and update CMakeLists.txt.")
+    message(WARNING "Download from: ${FOXGLOVE_URL}")
+    message(WARNING "Get SHA256 from: https://github.com/foxglove/foxglove-sdk/releases?q=sdk%2F&expanded=true")
+    FetchContent_Declare(
         foxglove
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-        # TODO: Copy the URL and SHA for the appropriate .zip file from here:
-        # https://github.com/foxglove/foxglove-sdk/releases?q=sdk%2F&expanded=true
-        URL https://github.com/foxglove/foxglove-sdk/releases/download/sdk%2Fv0.10.0/foxglove-v0.10.0-cpp-aarch64-apple-darwin.zip
-        URL_HASH SHA256=14ded1c5c0e8386cd8c8b9371ae99852131883f69f62500ec6c987daf23f0724
-)
+        URL ${FOXGLOVE_URL}
+    )
+else()
+    FetchContent_Declare(
+        foxglove
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        URL ${FOXGLOVE_URL}
+        URL_HASH SHA256=${FOXGLOVE_SHA256}
+    )
+endif()
+
 FetchContent_MakeAvailable(foxglove)
 
 include_directories(dep)
