@@ -138,8 +138,9 @@ void Viper::publishContinuous() {
             crc = calculateCrc16(respPkg, br-4);
 
             if (validateCrc(crc, respPkg, br-4)) {
-                nSensors = *(uint32_t*)(respPkg + 20);
-                pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
+	        nSensors = *(uint32_t*)(respPkg + 20);
+                static bool printed = false; if (!printed) { std::cout << "Using " << nSensors << " position sensors" << std::endl; printed = true; }
+	    	pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
                 frame = *(uint32_t*)(respPkg + 12);
 
                 pnoToFoxgloveSceneUpdate(pfd, nSensors);
