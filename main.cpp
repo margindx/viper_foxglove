@@ -39,13 +39,13 @@ void launchFoxglove() {
     Viper viper{&fgInterface, 10, 100};
     viper.setOffset(0, 0, 0);
 
-    // SerialForce serialForce{fgInterface};
-    // serialForce.setContactCallback(
-    //     [](mdx::RawForce &force) {
-    //         return force.f4 > 0.35;
-    //     }
-    // );
-    // serialForce.init("/dev/cu.usbmodem101");
+    SerialForce serialForce{fgInterface};
+    serialForce.setContactCallback(
+        [](mdx::RawForce &force) {
+            return force.f4 > 0.35;
+        }
+    );
+    serialForce.init("/dev/ttyACM0");
 
     std::atomic_bool done = false;
     sigint_handler = [&]
