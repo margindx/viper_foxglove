@@ -130,18 +130,19 @@ namespace mdx {
     NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Contact, hasContact, contactDuration)
     NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SwingTwist, nx, ny, nz, twist)
 
+    struct CombinedPosition { double x, y, z; };
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedPosition, x, y, z)
+
+    struct CombinedOrientation { double x, y, z, w; };
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedOrientation, x, y, z, w)
+
     struct CombinedSensorData {
-        // Pose (from /hh/pose)
-        double px, py, pz;
-        double qx, qy, qz, qw;
-        // Raw forces (from /hh/forces/raw)
-        float f1, f2, f3, f4;
-        // Contact (from /hh/forces/contact)
-        bool hasContact;
-        float contactDuration;
+        CombinedPosition position;
+        CombinedOrientation orientation;
+        RawForce forces;
+        Contact contact;
     };
-    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedSensorData,
-        px, py, pz, qx, qy, qz, qw, f1, f2, f3, f4, hasContact, contactDuration)
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedSensorData, position, orientation, forces, contact)
 
     constexpr char kViperLogChannelName[] = "/viper/log";
     constexpr char kViperTFChannelName[] = "/tf/viper";
@@ -691,18 +692,16 @@ public:
         mdx::CombinedSensorData combined;
         auto &pos = pose.pose->position.value();
         auto &ori = pose.pose->orientation.value();
-        combined.px = pos.x;  combined.py = pos.y;  combined.pz = pos.z;
-        combined.qx = ori.x;  combined.qy = ori.y;  combined.qz = ori.z;  combined.qw = ori.w;
+        combined.position = {pos.x, pos.y, pos.z};
+        combined.orientation = {ori.x, ori.y, ori.z, ori.w};
 
         {
             std::lock_guard<std::mutex> g{rawForceMtx_};
-            combined.f1 = rawForce_.f1;  combined.f2 = rawForce_.f2;
-            combined.f3 = rawForce_.f3;  combined.f4 = rawForce_.f4;
+            combined.forces = rawForce_;
         }
         {
             std::lock_guard<std::mutex> g{contactMtx_};
-            combined.hasContact = contact_.hasContact;
-            combined.contactDuration = contact_.contactDuration;
+            combined.contact = contact_;
         }
 
         json cmsg = combined;
