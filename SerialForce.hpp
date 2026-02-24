@@ -41,6 +41,9 @@ protected:
             updateContact_(rawForce);
 
             fgInterface_->logRawForce(rawForce);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            serial_.flushReceiver();
         }
     }
 
