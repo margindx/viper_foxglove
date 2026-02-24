@@ -37,7 +37,7 @@ void launchFoxglove() {
     std::this_thread::sleep_for(1000ms);
 
     Viper viper{&fgInterface, 10, 100};
-    viper.setOffset(0, 0, 0);
+    viper.setOffset(0.150, 0, 0); // slim: (0.150, 0, 0); YOP: (0.157, 0, 0)
 
     SerialForce serialForce{fgInterface};
     serialForce.setContactCallback(
