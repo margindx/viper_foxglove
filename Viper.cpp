@@ -64,7 +64,7 @@ void Viper::readUsb(viper_usb *pvpr) {
         if (br) {
             if (Viper::hasPnoPreamble(respPkg)) {
                 pqueue = &pnoQueue_;
-                timeOut = 10; // TODO: Check appropriate timeout
+                timeOut = 4;
             } else {
                 pqueue = &cmdQueue_;
             }
@@ -146,8 +146,6 @@ void Viper::publishContinuous() {
                 pnoToFoxgloveSceneUpdate(pfd, nSensors);
             }
         }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
     br = pnoQueue_.wait_and_pop(respPkg, respSize);
