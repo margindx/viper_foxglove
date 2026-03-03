@@ -130,6 +130,20 @@ namespace mdx {
     NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Contact, hasContact, contactDuration)
     NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SwingTwist, nx, ny, nz, twist)
 
+    struct CombinedPosition { double x, y, z; };
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedPosition, x, y, z)
+
+    struct CombinedOrientation { double x, y, z, w; };
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedOrientation, x, y, z, w)
+
+    struct CombinedSensorData {
+        CombinedPosition position;
+        CombinedOrientation orientation;
+        RawForce forces;
+        Contact contact;
+    };
+    NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CombinedSensorData, position, orientation, forces, contact)
+
     constexpr char kViperLogChannelName[] = "/viper/log";
     constexpr char kViperTFChannelName[] = "/tf/viper";
     constexpr char kWorldTFChannelName[] = "/tf/world";
@@ -142,6 +156,7 @@ namespace mdx {
     constexpr char kHandheldForcesRawChannelName[] = "/hh/forces/raw";
     constexpr char kHandheldForcesContactChannelName[] = "/hh/forces/contact";
     constexpr char kHandheldSwingTwistChannelName[] = "/hh/swing_twist";
+    constexpr char kCombinedSensorChannelName[] = "/hh/combined";
     constexpr char kHandheldSceneChannelName[] = "/hh/scene";
     constexpr char kSceneAnatomicalChannelName[] = "/scene/anatomical";
     constexpr char kSceneAnatomicalBboxChannelName[] = "/scene/anatomical/bbox";
@@ -175,6 +190,9 @@ class FoxgloveInterface {
 
     std::optional<foxglove::RawChannel> swingTwistChannel_;
     std::optional<foxglove::Schema> swingTwistSchema_;
+
+    std::optional<foxglove::RawChannel> combinedChannel_;
+    std::optional<foxglove::Schema> combinedSchema_;
 
     foxglove::McapWriterOptions mcapOptions_;
     std::optional<foxglove::McapWriter> mcapWriter_;
@@ -266,6 +284,26 @@ class FoxgloveInterface {
                 throw std::runtime_error(ss.str());
             }
             swingTwistChannel_.emplace(std::move(swingTwistSchemaChannelResult.value()));
+        }
+
+        {
+            json combinedSch = jsonschema::generate_schema<mdx::CombinedSensorData>();
+            foxglove::Schema schema;
+            schema.name = "CombinedSensorData";
+            schema.encoding = "jsonschema";
+            std::string schema_data = combinedSch.dump();
+            schema.data = reinterpret_cast<const std::byte*>(schema_data.data());
+            schema.data_len = schema_data.size();
+            combinedSchema_.emplace(schema);
+
+            auto result = foxglove::RawChannel::create(mdx::kCombinedSensorChannelName, "json", schema, context_);
+            if (!result.has_value()) {
+                std::stringstream ss;
+                ss << "Failed to create combined channel: " << foxglove::strerror(result.error()) << std::endl;
+                std::cerr << ss.str();
+                throw std::runtime_error(ss.str());
+            }
+            combinedChannel_.emplace(std::move(result.value()));
         }
     }
 
@@ -650,6 +688,25 @@ public:
         }
 
         poseChannel_.value().log(pose);
+
+        mdx::CombinedSensorData combined;
+        auto &pos = pose.pose->position.value();
+        auto &ori = pose.pose->orientation.value();
+        combined.position = {pos.x, pos.y, pos.z};
+        combined.orientation = {ori.x, ori.y, ori.z, ori.w};
+
+        {
+            std::lock_guard<std::mutex> g{rawForceMtx_};
+            combined.forces = rawForce_;
+        }
+        {
+            std::lock_guard<std::mutex> g{contactMtx_};
+            combined.contact = contact_;
+        }
+
+        json cmsg = combined;
+        auto cval = cmsg.dump();
+        combinedChannel_.value().log(reinterpret_cast<const std::byte*>(cval.c_str()), cval.size());
     }
 
     void growingCubeExample() {
