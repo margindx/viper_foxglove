@@ -32,17 +32,6 @@ namespace foxglove::utility {
         static foxglove::schemas::PackedElementField::NumericType type;
     };
 
-    template <>
-    foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<float>::type;
-
-    template <>
-    foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<double>::type;
-
-    template <>
-    foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<int>::type;
-
-    template <>
-    foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<unsigned int>::type;
 }
 
 
