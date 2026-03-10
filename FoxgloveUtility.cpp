@@ -17,4 +17,4 @@ template <>
 foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<int>::type = foxglove::schemas::PackedElementField::NumericType::INT32;
 
 template <>
-foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<uint>::type = foxglove::schemas::PackedElementField::NumericType::UINT32;
+foxglove::schemas::PackedElementField::NumericType foxglove::utility::NumericType<unsigned int>::type = foxglove::schemas::PackedElementField::NumericType::UINT32;
