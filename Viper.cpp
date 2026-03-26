@@ -495,13 +495,35 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
     }
 
     foxglove::schemas::Pose avgPose;
+    foxglove::schemas::Pose sensorProseCopy;
+
     double xAvg{0}, yAvg{0}, zAvg{0}, qxAvg{0}, qyAvg{0}, qzAvg{0}, qwAvg{0};
 
     size_t nPoses = poses.size();
     for (auto &pose : poses) {
-        xAvg += pose.position.value().x / nPoses;
-        yAvg += pose.position.value().y / nPoses;
-        zAvg += pose.position.value().z / nPoses;
+
+        // make a copy of this sensor so we dont propagate changes
+        // (having raw sensor output is useful)
+        sensorProseCopy.position.emplace(pose.position.value());
+        sensorProseCopy.orientation.emplace(pose.orientation.value());
+
+        // rotate and offset this sensor
+        transformPose(sensorProseCopy);
+
+        // track the average location of the probe tip.
+        // Note: projecting and then averaging is identical to
+        // averaging the points and then projecting by the average of
+        // the basis vectors. But projecting by an average of the
+        // quaternion is much more sensitive to when sensors are
+        // mis-aligned in their twist rotation.
+        xAvg += sensorProseCopy.position.value().x / nPoses;
+        yAvg += sensorProseCopy.position.value().y / nPoses;
+        zAvg += sensorProseCopy.position.value().z / nPoses;
+
+        // still just average the raw orientations... might be better to
+        // calculate the basis vectors and average those then re-calculate
+        // a quaternion from the rotated vectors to lessen impact of a
+        // mis-aligned sensor.
         qxAvg += pose.orientation.value().x / nPoses;
         qyAvg += pose.orientation.value().y / nPoses;
         qzAvg += pose.orientation.value().z / nPoses;
@@ -517,8 +539,7 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
 
     avgPose.position.emplace(foxglove::schemas::Vector3{xAvg, yAvg, zAvg});
     avgPose.orientation.emplace(foxglove::schemas::Quaternion{qxAvg, qyAvg, qzAvg, qwAvg});
-    // Apply offset
-    transformPose(avgPose);
+
     auto swingTwist = computeSwingTwist(avgPose);
 
     auto poseInFrame = foxglove::schemas::PoseInFrame{
