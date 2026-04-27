@@ -40,7 +40,9 @@ void launchFoxglove(std::string config_filename) {
 
     auto fgInterface = FoxgloveInterface{"viper.mcap"};
     std::this_thread::sleep_for(1000ms);
-   
+
+    Viper viper{&fgInterface, 10, 100};
+
     float offset_x = 0.150;
     float offset_y = 0.0;
     float offset_z = 0.0;
@@ -94,9 +96,17 @@ void launchFoxglove(std::string config_filename) {
         done = true;
     };
 
-//    std::this_thread::sleep_for(1000ms);
-
+    // initialize viper with all settings
+    viper.setOffset(offset_x, offset_y, offset_z); // slim: (0.150, 0, 0); YOP: (0.157, 0, 0)
     viper.initTransforms();
+
+    SerialForce serialForce{fgInterface};
+    serialForce.setContactCallback(
+        [](mdx::RawForce &force) {
+            return force.f4 > 0.35;
+        }
+    );
+    serialForce.init(std::move(pressure_port));
 
     long long counter = 1;
 
