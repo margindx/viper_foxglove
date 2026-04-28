@@ -27,6 +27,11 @@ protected:
     std::thread continuousPublishThread_;
 
     std::optional<std::function<bool(mdx::RawForce &)>> hasContactCallback_;
+    float _minimum_contact_force = 0.3; 
+    bool _require_sensor_1 = true;
+    bool _require_sensor_2 = true;
+    bool _require_sensor_3 = true;
+    bool _require_sensor_4 = true;
 
     void updateForces_() {
         while (!closed) {
@@ -47,10 +52,28 @@ protected:
         }
     }
 
+    bool hasContact_(mdx::RawForce &rawForce){
+        bool has_contact = true; 
+
+        if (_require_sensor_1){ 
+            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+        }
+        if (_require_sensor_2){ 
+            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+        }
+        if (_require_sensor_3){ 
+            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+        }
+        if (_require_sensor_4){ 
+            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+        }
+        return has_contact;
+    }
+
     void updateContact_(mdx::RawForce &rawForce) {
         auto now = std::chrono::system_clock::now();
 
-        if (hasContactCallback_.value()(rawForce)) {
+        if (hasContact_(rawForce)) {
             std::lock_guard<std::mutex> guardContact{contactMutex_};
             if (lastContactTime_.has_value()) {
                 auto dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - lastContactTime_.value()).count();
@@ -79,21 +102,15 @@ public:
         close();
     }
 
-    void setContactCallback(std::function<bool(mdx::RawForce &)> callback) {
-        hasContactCallback_ = callback;
-    }
 
-    void init(std::string &&port = "/dev/cu.usbmodem2101") {
+    void init(std::string &&port = "/dev/cu.usbmodem2101", 
+              float minimum_contact_force = 0.3) {
         auto serialRes = openSerial(std::move(port));
         if (!serialRes) {
             fgInterface_->logError("Failed to open force sensor serial port");
         }
 
-        if (!hasContactCallback_.has_value()) {
-            hasContactCallback_ = [](mdx::RawForce &rawForce) {
-                return rawForce.f4 > 0.3;
-            };
-        }
+        _minimum_contact_force = minimum_contact_force;
 
         startForceUpdate();
     }
@@ -102,6 +119,13 @@ public:
 
     bool openSerial(std::string &&port = "/dev/cu.usbmodem2101") {
         return serial_.openDevice(port.c_str(), 115200) == 1;
+    }
+
+    void setRequireSensor(bool f1, bool f2, bool f3, bool f4){
+        _require_sensor_1 = f1;
+        _require_sensor_2 = f2;
+        _require_sensor_3 = f3; 
+        _require_sensor_4 = f4;
     }
 
     void startForceUpdate() {
