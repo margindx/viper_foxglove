@@ -35,14 +35,7 @@ void launchFoxglove(std::string config_filename) {
         }
     });
 
-    std::filesystem::path mcapPath = "viper.mcap";
-    std::filesystem::remove(mcapPath);
-
-    auto fgInterface = FoxgloveInterface{"viper.mcap"};
-    std::this_thread::sleep_for(1000ms);
-
-    Viper viper{&fgInterface, 10, 100};
-
+    // ---- Parsing runtime config options ---- //
     float offset_x = 0.150;
     float offset_y = 0.0;
     float offset_z = 0.0;
@@ -106,8 +99,21 @@ void launchFoxglove(std::string config_filename) {
     cout << "    offset_x:" << offset_x << endl;
     cout << "    offset_y:" << offset_y << endl;
     cout << "    offset_z:" << offset_z << endl;
-    cout << "    minimum_contact_force:" << min_contact_force << endl;
     cout << "    pressure_device_port:" << pressure_port << endl;
+    cout << "    minimum_contact_force:" << min_contact_force << endl;
+    cout << "    contact_require_f1:" << contact_require_f1 << endl;
+    cout << "    contact_require_f2:" << contact_require_f2 << endl;
+    cout << "    contact_require_f3:" << contact_require_f3 << endl;
+    cout << "    contact_require_f4:" << contact_require_f4 << endl;
+    // ---- End of runtime config parsing ---- //
+
+    std::filesystem::path mcapPath = "viper.mcap";
+    std::filesystem::remove(mcapPath);
+
+    auto fgInterface = FoxgloveInterface{"viper.mcap"};
+    std::this_thread::sleep_for(1000ms);
+
+    Viper viper{&fgInterface, 10, 100};
 
     std::atomic_bool done = false;
     sigint_handler = [&]

@@ -59,13 +59,13 @@ protected:
             has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
         }
         if (_require_sensor_2){ 
-            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+            has_contact = has_contact & (rawForce.f2 > _minimum_contact_force);
         }
         if (_require_sensor_3){ 
-            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+            has_contact = has_contact & (rawForce.f3 > _minimum_contact_force);
         }
         if (_require_sensor_4){ 
-            has_contact = has_contact & (rawForce.f1 > _minimum_contact_force);
+            has_contact = has_contact & (rawForce.f4 > _minimum_contact_force);
         }
         return has_contact;
     }
