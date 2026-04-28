@@ -35,18 +35,15 @@ void launchFoxglove(std::string config_filename) {
         }
     });
 
-    std::filesystem::path mcapPath = "viper.mcap";
-    std::filesystem::remove(mcapPath);
-
-    auto fgInterface = FoxgloveInterface{"viper.mcap"};
-    std::this_thread::sleep_for(1000ms);
-
-    Viper viper{&fgInterface, 10, 100};
-
+    // ---- Parsing runtime config options ---- //
     float offset_x = 0.150;
     float offset_y = 0.0;
     float offset_z = 0.0;
     float min_contact_force = 0.35;
+    bool contact_require_f1 = true;
+    bool contact_require_f2 = true;
+    bool contact_require_f3 = true;
+    bool contact_require_f4 = true;
     std::string &&pressure_port = "/dev/ttyACM0";
 
     if (std::filesystem::exists(config_filename))
@@ -68,12 +65,27 @@ void launchFoxglove(std::string config_filename) {
         }
         if (settings.contains("minimum_contact_force"))
         {
-            // min_contact_force = settings["minimum_contact_force"];
-            cout << "    Warning: minimum_contact_force not used at present\n";
+            min_contact_force = settings["minimum_contact_force"];            
         }
         if (settings.contains("pressure_device_port"))
         {
             pressure_port = settings["pressure_device_port"];
+        }
+        if (settings.contains("contact_require_f1"))
+        {
+            contact_require_f1 = settings["contact_require_f1"];
+        }
+        if (settings.contains("contact_require_f2"))
+        {
+            contact_require_f2 = settings["contact_require_f2"];
+        }
+        if (settings.contains("contact_require_f3"))
+        {
+            contact_require_f3 = settings["contact_require_f3"];
+        }
+        if (settings.contains("contact_require_f4"))
+        {
+            contact_require_f4 = settings["contact_require_f4"];
         }
 
         cout << "    Done parsing.\n";
@@ -87,8 +99,21 @@ void launchFoxglove(std::string config_filename) {
     cout << "    offset_x:" << offset_x << endl;
     cout << "    offset_y:" << offset_y << endl;
     cout << "    offset_z:" << offset_z << endl;
-    // cout << "    minimum_contact_force:" << min_contact_force << endl;
     cout << "    pressure_device_port:" << pressure_port << endl;
+    cout << "    minimum_contact_force:" << min_contact_force << endl;
+    cout << "    contact_require_f1:" << contact_require_f1 << endl;
+    cout << "    contact_require_f2:" << contact_require_f2 << endl;
+    cout << "    contact_require_f3:" << contact_require_f3 << endl;
+    cout << "    contact_require_f4:" << contact_require_f4 << endl;
+    // ---- End of runtime config parsing ---- //
+
+    std::filesystem::path mcapPath = "viper.mcap";
+    std::filesystem::remove(mcapPath);
+
+    auto fgInterface = FoxgloveInterface{"viper.mcap"};
+    std::this_thread::sleep_for(1000ms);
+
+    Viper viper{&fgInterface, 10, 100};
 
     std::atomic_bool done = false;
     sigint_handler = [&]
@@ -100,14 +125,9 @@ void launchFoxglove(std::string config_filename) {
     viper.setOffset(offset_x, offset_y, offset_z); // slim: (0.150, 0, 0); YOP: (0.157, 0, 0)
     viper.initTransforms();
 
-    SerialForce serialForce{fgInterface};
-    serialForce.setContactCallback(
-        [](mdx::RawForce &force) {
-            return force.f4 > 0.35;
-        }
-    );
-    serialForce.init(std::move(pressure_port));
-
+    SerialForce serialForce{fgInterface};    
+    serialForce.init(std::move(pressure_port), min_contact_force);
+    serialForce.setRequireSensor(contact_require_f1, contact_require_f2, contact_require_f3, contact_require_f4);
     long long counter = 1;
 
     while (!done) {
