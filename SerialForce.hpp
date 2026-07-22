@@ -16,6 +16,7 @@
 class SerialForce {
 protected:
     float force1_{}, force2_{}, force3_{}, force4_{};
+    int contactFlag_{};
     mutable std::mutex mutex1_, mutex2_, mutex3_, mutex4_, contactMutex_;
     serialib serial_;
     char buf_[100]{};
@@ -27,7 +28,8 @@ protected:
     std::thread continuousPublishThread_;
 
     std::optional<std::function<bool(mdx::RawForce &)>> hasContactCallback_;
-    float _minimum_contact_force = 0.3; 
+    float _minimum_contact_force = 0.3;
+    bool _use_hardware_contact = true;
     bool _require_sensor_1 = true;
     bool _require_sensor_2 = true;
     bool _require_sensor_3 = true;
@@ -40,7 +42,14 @@ protected:
             std::lock_guard<std::mutex> guard2(mutex2_);
             std::lock_guard<std::mutex> guard3(mutex3_);
             std::lock_guard<std::mutex> guard4(mutex4_);
-            int result = sscanf(buf_, "%f,%f,%f,%f\n", &force1_, &force2_, &force3_, &force4_);
+            int contactFlag = 0;
+            int result = sscanf(buf_, "%f,%f,%f,%f,%d\n", &force1_, &force2_, &force3_, &force4_, &contactFlag);
+            if (result != 5) {
+                // Malformed / partial line — skip this read rather than acting on stale values.
+                serial_.flushReceiver();
+                continue;
+            }
+            contactFlag_ = contactFlag;
             mdx::RawForce rawForce{force1_, force2_, force3_, force4_};
 
             updateContact_(rawForce);
@@ -73,7 +82,10 @@ protected:
     void updateContact_(mdx::RawForce &rawForce) {
         auto now = std::chrono::system_clock::now();
 
-        if (hasContact_(rawForce)) {
+        bool contactDetected = _use_hardware_contact ? (contactFlag_ != 0)
+                                                      : hasContact_(rawForce);
+
+        if (contactDetected) {
             std::lock_guard<std::mutex> guardContact{contactMutex_};
             if (lastContactTime_.has_value()) {
                 auto dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - lastContactTime_.value()).count();
@@ -119,6 +131,10 @@ public:
 
     bool openSerial(std::string &&port = "/dev/cu.usbmodem2101") {
         return serial_.openDevice(port.c_str(), 115200) == 1;
+    }
+
+    void setUseHardwareContact(bool useHardware) {
+        _use_hardware_contact = useHardware;
     }
 
     void setRequireSensor(bool f1, bool f2, bool f3, bool f4){
