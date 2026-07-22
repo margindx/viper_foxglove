@@ -23,3 +23,15 @@ The C++ program has the following dependencies:
 
 The Python code relies on [`foxglove2zmq`](https://github.com/helkebir/foxglove2zmq), which can be installed using
 `pip install foxglove2zmq`. It currently spawns a pull server, but can be set to create a pub-sub server.
+
+## Runtime configuration
+
+A number of runtime options can be configured via json file. By default, when starting `viper` (or `viper.exe`), it will look for a configuration file named `viper-config.json` in the directory from which you start `viper`. You can override this by providing a path to a json:
+
+```shell
+viper /path/to/viper-config.json
+```
+
+See the `viper-config.json` in the source directory for options. 
+
+If not provided (or if the file is not found), default values will be used. 

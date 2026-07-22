@@ -1,0 +1,22 @@
+{
+    "offset_x": 0.157,
+    "offset_y": 0.0,
+    "offset_z": 0.0,
+    "minimum_contact_force": 0.35,
+    "pressure_device_port": "/dev/ttyACM0",
+    "contact_require_f1": true, 
+    "contact_require_f2": true, 
+    "contact_require_f3": true, 
+    "contact_require_f4": true, 
+    "_comment": {
+        "offset_x": "along-probe offset from sensor to tip",
+        "offset_y": "horizontal offset from sensor to probe center (keep at 0)",
+        "offset_z": "horizontal offset from sensor to probe center (keep at 0)",
+        "minimum_contact_force": "(NOT USED) the force threshold, above which we have contact",
+        "pressure_device_port": "The USB device port for the pressure sensor",
+        "contact_require_f1": "Whether force sensor 1 is required to be above minimum_contact_force", 
+        "contact_require_f2": "Whether force sensor 2 is required to be above minimum_contact_force", 
+        "contact_require_f3": "Whether force sensor 3 is required to be above minimum_contact_force", 
+        "contact_require_f4": "Whether force sensor 4 is required to be above minimum_contact_force"
+    }
+}
