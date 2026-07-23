@@ -1,0 +1,77 @@
+name: Windows build
+
+# Verifies viper_foxglove compiles on Windows, mirroring the manual steps in
+# README.md ("Windows installation and building notes").
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE.md"
+      - ".gitignore"
+      - ".idea/**"
+      - "pointcloud.ipynb"
+  workflow_dispatch:
+
+env:
+  # Open3D prebuilt devel package (see README step 3). 0.19.0 as of 4/16/2026.
+  OPEN3D_VERSION: "0.19.0"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Replicates the "x64 Native Tools Command Prompt for VS" the README
+      # requires, so MSVC and vcpkg have their build environment set up.
+      - name: Set up MSVC (x64) environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # README step 3: download the Open3D devel zip, unpack it, and expose its
+      # CMake config dir via the Open3D_DIR environment variable.
+      - name: Cache Open3D
+        id: cache-open3d
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/open3d
+          key: open3d-${{ env.OPEN3D_VERSION }}-windows-amd64
+
+      - name: Download Open3D
+        if: steps.cache-open3d.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ver = "${env:OPEN3D_VERSION}"
+          $zip = "open3d-devel-windows-amd64-$ver.zip"
+          $url = "https://github.com/isl-org/Open3D/releases/download/v$ver/$zip"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "${{ github.workspace }}/open3d" -Force
+
+      - name: Set Open3D_DIR
+        shell: pwsh
+        run: |
+          $cmakeDir = Join-Path "${{ github.workspace }}/open3d" "open3d-devel-windows-amd64-${env:OPEN3D_VERSION}/CMake"
+          if (-not (Test-Path $cmakeDir)) {
+            throw "Open3D CMake dir not found at $cmakeDir"
+          }
+          Write-Host "Open3D_DIR=$cmakeDir"
+          "Open3D_DIR=$cmakeDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # README step 4: configure. Use the base `vcpkg` preset rather than
+      # `default`, so VCPKG_ROOT comes from the runner's environment
+      # (GitHub-hosted Windows runners ship a bootstrapped vcpkg at C:\vcpkg)
+      # instead of the developer-specific path baked into CMakeUserPresets.json.
+      # vcpkg manifest mode fetches protobuf and libusb (per vcpkg.json).
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset=vcpkg
+
+      - name: Build (Release)
+        shell: pwsh
+        run: cmake --build build --config Release
