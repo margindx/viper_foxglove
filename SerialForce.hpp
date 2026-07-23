@@ -44,22 +44,50 @@ protected:
     size_t connectTries_ = 5;               // extra attempts beyond the first
     unsigned int connectTimeoutMs_ = 200;   // backoff between attempts
 
+    // Human-readable description of the last OS-level error from a serial call.
+    // serialib uses Win32 on Windows (which reports via GetLastError, NOT errno)
+    // and POSIX syscalls elsewhere (which set errno), so the source differs by
+    // platform. Call this immediately after the failed serial call, before any
+    // other call can overwrite the error state.
+    static std::string lastOsError_() {
+#ifdef _WIN32
+        DWORD code = GetLastError();
+        if (code == 0) return "0: no error reported";
+        LPSTR buf = nullptr;
+        DWORD len = FormatMessageA(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
+                | FORMAT_MESSAGE_IGNORE_INSERTS,
+            nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            reinterpret_cast<LPSTR>(&buf), 0, nullptr);
+        std::string msg = (len && buf) ? std::string(buf, len) : "unknown error";
+        if (buf) LocalFree(buf);
+        // FormatMessage appends a trailing CRLF; strip it for a clean log line.
+        while (!msg.empty() && (msg.back() == '\r' || msg.back() == '\n' || msg.back() == ' '))
+            msg.pop_back();
+        return std::to_string(code) + ": " + msg;
+#else
+        int code = errno;
+        return std::to_string(code) + ": " + std::strerror(code);
+#endif
+    }
+
     // Bounded retry loop used at startup, mirroring Viper's connect loop:
     // connectTries_ extra attempts beyond the first, connectTimeoutMs_ apart.
-    // Logs the serialib return code and errno on each failure for diagnosis.
+    // Logs the serialib return code and OS error on each failure for diagnosis.
     bool connect_() {
         for (size_t attempt = 0; attempt <= connectTries_; ++attempt) {
             char rc = serial_.openDevice(port_.c_str(), kBaudRate_);
-            int err = errno;
             if (rc == 1) {
                 return true;
             }
+            // Capture before anything else touches errno / GetLastError.
+            const std::string osErr = lastOsError_();
 
             fgInterface_->logWarning(
                 "Force sensor openDevice(" + port_ + ") failed on attempt "
                 + std::to_string(attempt + 1) + "/" + std::to_string(connectTries_ + 1)
                 + " (serialib code " + std::to_string(static_cast<int>(rc))
-                + ", errno " + std::to_string(err) + ": " + std::strerror(err) + ")");
+                + ", OS error " + osErr + ")");
 
             if (attempt < connectTries_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(connectTimeoutMs_));
