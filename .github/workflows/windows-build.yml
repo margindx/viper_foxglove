@@ -17,6 +17,10 @@ on:
 env:
   # Open3D prebuilt devel package (see README step 3). 0.19.0 as of 4/16/2026.
   OPEN3D_VERSION: "0.19.0"
+  # Where vcpkg stores built binary packages. Cached across runs so protobuf
+  # and its abseil dependency (the bulk of configure time) are only compiled
+  # on a cache miss.
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
 
 jobs:
   build:
@@ -24,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Replicates the "x64 Native Tools Command Prompt for VS" the README
       # requires, so MSVC and vcpkg have their build environment set up.
@@ -37,10 +41,21 @@ jobs:
       # CMake config dir via the Open3D_DIR environment variable.
       - name: Cache Open3D
         id: cache-open3d
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/open3d
           key: open3d-${{ env.OPEN3D_VERSION }}-windows-amd64
+
+      # Replaces the removed vcpkg x-gha backend: cache vcpkg's binary package
+      # store directly. Keyed on the manifest and the pinned registry baseline,
+      # so the cache is rebuilt only when dependencies or the baseline change.
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
       - name: Download Open3D
         if: steps.cache-open3d.outputs.cache-hit != 'true'
@@ -70,7 +85,11 @@ jobs:
       # vcpkg manifest mode fetches protobuf and libusb (per vcpkg.json).
       - name: Configure
         shell: pwsh
-        run: cmake --preset=vcpkg
+        run: |
+          # vcpkg errors if the binary-cache dir doesn't exist; ensure it's
+          # present on a cold cache (harmless when the cache was restored).
+          New-Item -ItemType Directory -Force -Path "${env:VCPKG_DEFAULT_BINARY_CACHE}" | Out-Null
+          cmake --preset=vcpkg
 
       - name: Build (Release)
         shell: pwsh
