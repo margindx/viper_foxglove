@@ -8,6 +8,7 @@
 #include "serialib/serialib.h"
 #include <mutex>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <thread>
 #include <functional>
@@ -36,8 +37,26 @@ protected:
     bool _require_sensor_4 = true;
 
     void updateForces_() {
+        char latest[sizeof(buf_)];
         while (!closed) {
-            serial_.readString(buf_, '\n', 100, 5000);
+            // Block for the next complete line.
+            if (serial_.readString(buf_, '\n', 100, 5000) <= 0) {
+                // Timeout (0) or device read error (<0): nothing complete to parse.
+                continue;
+            }
+
+            // Advance to the freshest complete line already buffered, dropping any
+            // backlog so contact/force stay low-latency when we can't keep up. We
+            // drain with readString (1 ms, non-blocking in practice) rather than
+            // flushReceiver() so reads stay line-aligned — a blind flush can leave
+            // the next read starting mid-line, which the parser would then reject.
+            // A short-timeout read that finds no further complete line returns <=0
+            // and would clobber its buffer, so drain into a scratch buffer and only
+            // promote a successful read.
+            while (serial_.readString(latest, '\n', 100, 1) > 0) {
+                std::memcpy(buf_, latest, sizeof(buf_));
+            }
+
             std::lock_guard<std::mutex> guard1(mutex1_);
             std::lock_guard<std::mutex> guard2(mutex2_);
             std::lock_guard<std::mutex> guard3(mutex3_);
@@ -45,8 +64,7 @@ protected:
             int contactFlag = 0;
             int result = sscanf(buf_, "%f,%f,%f,%f,%d\n", &force1_, &force2_, &force3_, &force4_, &contactFlag);
             if (result != 5) {
-                // Malformed / partial line — skip this read rather than acting on stale values.
-                serial_.flushReceiver();
+                // Corrupt line — skip it. Reads stay line-aligned, so no flush/resync needed.
                 continue;
             }
             contactFlag_ = contactFlag;
@@ -55,9 +73,6 @@ protected:
             updateContact_(rawForce);
 
             fgInterface_->logRawForce(rawForce);
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
-            serial_.flushReceiver();
         }
     }
 
