@@ -171,7 +171,7 @@ public:
 
     void setF2(double f) {
         std::lock_guard<std::mutex> guard(mutex2_);
-        force1_ = f;
+        force2_ = f;
     }
 
     float getF3() const {
@@ -181,7 +181,7 @@ public:
 
     void setF3(double f) {
         std::lock_guard<std::mutex> guard(mutex3_);
-        force1_ = f;
+        force3_ = f;
     }
 
     float getF4() const {
@@ -191,7 +191,7 @@ public:
 
     void setF4(double f) {
         std::lock_guard<std::mutex> guard(mutex4_);
-        force1_ = f;
+        force4_ = f;
     }
 
     mdx::RawForce getRawForce() {
