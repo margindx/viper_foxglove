@@ -8,6 +8,9 @@
 #include "serialib/serialib.h"
 #include <mutex>
 #include <cstdio>
+#include <cstring>
+#include <cerrno>
+#include <string>
 #include <iostream>
 #include <thread>
 #include <functional>
@@ -27,15 +30,70 @@ protected:
     std::thread continuousPublishThread_;
 
     std::optional<std::function<bool(mdx::RawForce &)>> hasContactCallback_;
-    float _minimum_contact_force = 0.3; 
+    float _minimum_contact_force = 0.3;
     bool _require_sensor_1 = true;
     bool _require_sensor_2 = true;
     bool _require_sensor_3 = true;
     bool _require_sensor_4 = true;
 
+    // Serial connection parameters, retained for startup and runtime reconnect.
+    static constexpr unsigned int kBaudRate_ = 115200;
+    std::string port_ = "/dev/cu.usbmodem2101";
+    size_t connectTries_ = 5;               // extra attempts beyond the first
+    unsigned int connectTimeoutMs_ = 200;   // backoff between attempts
+
+    // Bounded retry loop used at startup, mirroring Viper's connect loop:
+    // connectTries_ extra attempts beyond the first, connectTimeoutMs_ apart.
+    // Logs the serialib return code and errno on each failure for diagnosis.
+    bool connect_() {
+        for (size_t attempt = 0; attempt <= connectTries_; ++attempt) {
+            char rc = serial_.openDevice(port_.c_str(), kBaudRate_);
+            int err = errno;
+            if (rc == 1) {
+                return true;
+            }
+
+            fgInterface_->logWarning(
+                "Force sensor openDevice(" + port_ + ") failed on attempt "
+                + std::to_string(attempt + 1) + "/" + std::to_string(connectTries_ + 1)
+                + " (serialib code " + std::to_string(static_cast<int>(rc))
+                + ", errno " + std::to_string(err) + ": " + std::strerror(err) + ")");
+
+            if (attempt < connectTries_) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(connectTimeoutMs_));
+            }
+        }
+        return false;
+    }
+
     void updateForces_() {
         while (!closed) {
-            serial_.readString(buf_, '\n', 100, 5000);
+            // (Re)connect if the port isn't open — covers a device that was
+            // absent at startup or dropped mid-session. One attempt per loop,
+            // backing off between tries, until connected or shut down. Failed
+            // attempts are not logged individually here to avoid log spam.
+            if (!serial_.isDeviceOpen()) {
+                if (serial_.openDevice(port_.c_str(), kBaudRate_) != 1) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(connectTimeoutMs_));
+                    continue;
+                }
+                fgInterface_->logInfo("Force sensor serial port connected: " + port_);
+                serial_.flushReceiver();
+            }
+
+            int n = serial_.readString(buf_, '\n', 100, 5000);
+            if (n < 0) {
+                // Negative return is a device-level read error (e.g. unplugged);
+                // drop the connection so the loop above reconnects.
+                fgInterface_->logWarning("Force sensor read failed; will attempt to reconnect");
+                serial_.closeDevice();
+                continue;
+            }
+            if (n == 0) {
+                // Timeout with no complete line — don't parse a stale buffer.
+                continue;
+            }
+
             std::lock_guard<std::mutex> guard1(mutex1_);
             std::lock_guard<std::mutex> guard2(mutex2_);
             std::lock_guard<std::mutex> guard3(mutex3_);
@@ -103,23 +161,29 @@ public:
     }
 
 
-    void init(std::string &&port = "/dev/cu.usbmodem2101", 
-              float minimum_contact_force = 0.3) {
-        auto serialRes = openSerial(std::move(port));
-        if (!serialRes) {
-            fgInterface_->logError("Failed to open force sensor serial port");
+    void init(std::string &&port = "/dev/cu.usbmodem2101",
+              float minimum_contact_force = 0.3,
+              size_t connectTries = 5,
+              unsigned int connectTimeoutMs = 200) {
+        port_ = std::move(port);
+        _minimum_contact_force = minimum_contact_force;
+        connectTries_ = connectTries;
+        connectTimeoutMs_ = connectTimeoutMs;
+
+        if (connect_()) {
+            fgInterface_->logInfo("Force sensor serial port opened: " + port_);
+        } else {
+            fgInterface_->logError(
+                "Force sensor serial port failed to open after retries (" + port_
+                + "); continuing without force data and retrying in the background");
         }
 
-        _minimum_contact_force = minimum_contact_force;
-
+        // Start the reader regardless of the initial result: if the open failed
+        // it keeps retrying, so the application runs degraded rather than dead.
         startForceUpdate();
     }
 
     bool closed = false;
-
-    bool openSerial(std::string &&port = "/dev/cu.usbmodem2101") {
-        return serial_.openDevice(port.c_str(), 115200) == 1;
-    }
 
     void setRequireSensor(bool f1, bool f2, bool f3, bool f4){
         _require_sensor_1 = f1;
