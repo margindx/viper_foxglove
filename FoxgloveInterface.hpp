@@ -240,6 +240,12 @@ class FoxgloveInterface {
     std::vector<mdx::Point6d> pointsAll_;
     std::vector<mdx::Point6d> pointsContact_;
 
+    // When false, this application does not generate locally-derived geometry
+    // (point clouds, mesh, and the Viper scene trail) — a downstream component
+    // does. Set once at startup before the Viper starts streaming; read-only
+    // thereafter. Raw poses/TF/forces are unaffected.
+    bool generateGeometry_ = true;
+
     std::mutex meshMtx_;
     std::shared_ptr<open3d::geometry::TriangleMesh> mesh_;
 
@@ -538,7 +544,12 @@ public:
         return timestamp;
     }
 
+    void setGenerateGeometry(bool enabled) { generateGeometry_ = enabled; }
+    bool generateGeometry() const { return generateGeometry_; }
+
     void publishPointClouds() {
+        if (!generateGeometry_) return;
+
         auto timestamp = getTimestamp();
 
         auto pcAll = *makePointCloud(pointsAll_);
@@ -551,6 +562,7 @@ public:
     }
 
     void publishMesh() {
+        if (!generateGeometry_) return;
 //        mdx::Point6dView pointView{pointsContact_};
         mdx::Point6dView pointView{pointsAll_};
         auto mesh = mdx::geometry::CreateMesh(pointView.points, pointView.normals);
@@ -579,6 +591,8 @@ public:
     }
 
     void publishMeshModel() {
+        if (!generateGeometry_) return;
+
         foxglove::schemas::ModelPrimitive model;
         {
             std::lock_guard<std::mutex> guard{modelMtx_};
@@ -714,16 +728,18 @@ public:
     }
 
     void publishPose(foxglove::schemas::PoseInFrame &pose) {
-        auto pointMdx = mdx::Point6d::fromPose(pose);
+        if (generateGeometry_) {
+            auto pointMdx = mdx::Point6d::fromPose(pose);
 
-        {
-            std::lock_guard<std::mutex> guard{pointsAllMtx_};
-            pointsAll_.push_back(pointMdx);
-        }
+            {
+                std::lock_guard<std::mutex> guard{pointsAllMtx_};
+                pointsAll_.push_back(pointMdx);
+            }
 
-        if (hasContact) {
-            std::lock_guard<std::mutex> guard{pointsContactMtx_};
-            pointsContact_.push_back(pointMdx);
+            if (hasContact) {
+                std::lock_guard<std::mutex> guard{pointsContactMtx_};
+                pointsContact_.push_back(pointMdx);
+            }
         }
 
         poseChannel_.value().log(pose);
