@@ -49,7 +49,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # Windows
     if(FOXGLOVE_ARCH STREQUAL "x86_64")
         set(FOXGLOVE_PLATFORM "x86_64-pc-windows-msvc")
-        set(FOXGLOVE_SHA256 "REPLACE_WITH_ACTUAL_SHA256_FOR_WINDOWS_X86_64")
+        set(FOXGLOVE_SHA256 "f59d548c05c56b3c55da09a1dc6a4ffd863d16ebbd6b7371687ca324ebc20552")
     elseif(FOXGLOVE_ARCH STREQUAL "aarch64")
         set(FOXGLOVE_PLATFORM "aarch64-pc-windows-msvc")
         set(FOXGLOVE_SHA256 "REPLACE_WITH_ACTUAL_SHA256_FOR_WINDOWS_AARCH64")
@@ -104,12 +104,17 @@ else()
     set(LIBUSB_LIBRARIES "/opt/homebrew/Cellar/libusb/1.0.27/lib/libusb-1.0.dylib")
 endif()
 
-link_directories(/opt/homebrew/Cellar/libusb/1.0.27/lib)
-include_directories(/opt/homebrew/Cellar/libusb/1.0.27/include/libusb-1.0)
+# Add pkg-config reported library dirs (e.g. vcpkg path on Windows, Homebrew on macOS)
+link_directories(${LIBUSB_LIBRARY_DIRS})
+if(NOT WIN32)
+    # macOS Homebrew fallback when pkg-config does not report a directory
+    link_directories(/opt/homebrew/Cellar/libusb/1.0.27/lib)
+    include_directories(/opt/homebrew/Cellar/libusb/1.0.27/include/libusb-1.0)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(viper main.cpp viper_ui.h viper_ui.cpp viper_usb.h viper_usb.cpp ViperInterface.h viper_queue.h viper_queue.cpp
+add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterface.h viper_queue.h viper_queue.cpp
         dep/serialib/serialib.cpp
         SensorData.cpp
         SensorData.hpp
@@ -128,11 +133,30 @@ add_executable(viper main.cpp viper_ui.h viper_ui.cpp viper_usb.h viper_usb.cpp 
         DynamicProtobufDecoder.hpp)
 # VPif.h VPif.cpp VPcmdDefs.h
 
+# viper_ui.cpp uses POSIX-only headers (unistd.h, termios.h); exclude on Windows
+if(NOT WIN32)
+    target_sources(viper PRIVATE viper_ui.cpp)
+endif()
+
+# NOMINMAX: prevent windows.h from defining min/max macros that break Open3D/STL headers
+# _USE_MATH_DEFINES: make MSVC define M_PI in <cmath>
+if(WIN32)
+    target_compile_definitions(viper PRIVATE NOMINMAX _USE_MATH_DEFINES)
+    # ws2_32:   Windows Sockets 2 (required by the pre-built Foxglove Rust library)
+    # ntdll:    NT kernel APIs (NtCancelIoFileEx, NtDeviceIoControlFile, etc.) used by mio/tokio
+    # userenv:  GetUserProfileDirectoryW used by Rust std::env::home_dir
+    target_link_libraries(viper PRIVATE ws2_32 ntdll userenv)
+endif()
+
 # Include libusb headers
 target_include_directories(viper PRIVATE ${LIBUSB_INCLUDE_DIRS})
 
-# Link libusb libraries
-target_link_libraries(viper PRIVATE ${LIBUSB_LIBRARIES} pthread)
+# Link libusb libraries (pthreads is not needed on Windows — MSVC uses native threads)
+if(WIN32)
+    target_link_libraries(viper PRIVATE ${LIBUSB_LIBRARIES})
+else()
+    target_link_libraries(viper PRIVATE ${LIBUSB_LIBRARIES} pthread)
+endif()
 
 # Add include directory for Foxglove SDK
 target_include_directories(viper PRIVATE ${foxglove_SOURCE_DIR}/include)
@@ -150,8 +174,12 @@ target_sources(viper PRIVATE ${FOXGLOVE_SOURCES})
 # Pass additional compiler options if necessary
 target_compile_options(viper PRIVATE ${LIBUSB_CFLAGS_OTHER})
 
-# Link against libfoxglove.a
-target_link_libraries(viper PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
+# Link against the Foxglove SDK static library (extension differs by platform)
+if(WIN32)
+    target_link_libraries(viper PRIVATE ${foxglove_SOURCE_DIR}/lib/foxglove.lib)
+else()
+    target_link_libraries(viper PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
+endif()
 
 target_link_libraries(viper PRIVATE Open3D::Open3D)
 

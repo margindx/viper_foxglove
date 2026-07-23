@@ -156,5 +156,36 @@ T decodeMessage(const google::protobuf::Message& message) {
     return T{};
 }
 
+// Forward-declare explicit specializations so other TUs do not instantiate the
+// primary template for these types (which would produce duplicate-symbol linker errors).
+#ifdef _WIN32
+#pragma push_macro("ERROR")
+#pragma push_macro("DEBUG")
+#pragma push_macro("WARNING")
+#pragma push_macro("INFO")
+#pragma push_macro("constant")
+#undef ERROR
+#undef DEBUG
+#undef WARNING
+#undef INFO
+#undef constant
+#endif
+#include <foxglove/schemas.hpp>
+#ifdef _WIN32
+#pragma pop_macro("ERROR")
+#pragma pop_macro("DEBUG")
+#pragma pop_macro("WARNING")
+#pragma pop_macro("INFO")
+#pragma pop_macro("constant")
+#endif
+
+template<> foxglove::schemas::Vector3 decodeMessage<foxglove::schemas::Vector3>(const google::protobuf::Message&);
+template<> foxglove::schemas::Quaternion decodeMessage<foxglove::schemas::Quaternion>(const google::protobuf::Message&);
+template<> foxglove::schemas::Color decodeMessage<foxglove::schemas::Color>(const google::protobuf::Message&);
+template<> foxglove::schemas::Pose decodeMessage<foxglove::schemas::Pose>(const google::protobuf::Message&);
+template<> foxglove::schemas::Timestamp decodeMessage<foxglove::schemas::Timestamp>(const google::protobuf::Message&);
+template<> foxglove::schemas::FrameTransform decodeMessage<foxglove::schemas::FrameTransform>(const google::protobuf::Message&);
+template<> foxglove::schemas::CubePrimitive decodeMessage<foxglove::schemas::CubePrimitive>(const google::protobuf::Message&);
+
 
 #endif //VIPER_DYNAMICPROTOBUFDECODER_HPP

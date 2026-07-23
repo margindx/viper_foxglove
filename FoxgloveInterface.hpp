@@ -5,9 +5,32 @@
 #ifndef VIPER_FOXGLOVEINTERFACE_HPP
 #define VIPER_FOXGLOVEINTERFACE_HPP
 
+// On Windows, headers included earlier (libusb, serialib) pull in <windows.h>
+// which defines macros (ERROR, DEBUG, WARNING, constant) that collide with
+// identifiers inside the Foxglove SDK headers.  Save and clear them here, then
+// restore them immediately afterwards so that the rest of the project is unaffected.
+#ifdef _WIN32
+#pragma push_macro("ERROR")
+#pragma push_macro("DEBUG")
+#pragma push_macro("WARNING")
+#pragma push_macro("INFO")
+#pragma push_macro("constant")
+#undef ERROR
+#undef DEBUG
+#undef WARNING
+#undef INFO
+#undef constant
+#endif
 #include <foxglove/server.hpp>
 #include <foxglove/schemas.hpp>
 #include <foxglove/mcap.hpp>
+#ifdef _WIN32
+#pragma pop_macro("ERROR")
+#pragma pop_macro("DEBUG")
+#pragma pop_macro("WARNING")
+#pragma pop_macro("INFO")
+#pragma pop_macro("constant")
+#endif
 #include <nlohmann/json.hpp>
 #include <nlohmann/jsonschema.hpp>
 #include <Eigen/Dense>
@@ -161,6 +184,22 @@ namespace mdx {
     constexpr char kSceneAnatomicalChannelName[] = "/scene/anatomical";
     constexpr char kSceneAnatomicalBboxChannelName[] = "/scene/anatomical/bbox";
 }
+
+// Re-apply macro guards for the class body: inline method definitions reference
+// foxglove identifiers (e.g. Log::LogLevel::ERROR, PackedElementField::NumericType::constant)
+// that would be clobbered by macros brought in through the Open3D / Windows include chain.
+#ifdef _WIN32
+#pragma push_macro("ERROR")
+#pragma push_macro("DEBUG")
+#pragma push_macro("WARNING")
+#pragma push_macro("INFO")
+#pragma push_macro("constant")
+#undef ERROR
+#undef DEBUG
+#undef WARNING
+#undef INFO
+#undef constant
+#endif
 
 class FoxgloveInterface {
     foxglove::Context context_;
@@ -734,5 +773,12 @@ public:
     }
 };
 
+#ifdef _WIN32
+#pragma pop_macro("ERROR")
+#pragma pop_macro("DEBUG")
+#pragma pop_macro("WARNING")
+#pragma pop_macro("INFO")
+#pragma pop_macro("constant")
+#endif
 
 #endif //VIPER_FOXGLOVEINTERFACE_HPP
