@@ -40,6 +40,7 @@ void launchFoxglove(std::string config_filename) {
     float offset_y = 0.0;
     float offset_z = 0.0;
     float min_contact_force = 0.35;
+    bool use_hardware_contact = true;
     bool contact_require_f1 = true;
     bool contact_require_f2 = true;
     bool contact_require_f3 = true;
@@ -71,6 +72,10 @@ void launchFoxglove(std::string config_filename) {
         {
             pressure_port = settings["pressure_device_port"];
         }
+        if (settings.contains("use_hardware_contact"))
+        {
+            use_hardware_contact = settings["use_hardware_contact"];
+        }
         if (settings.contains("contact_require_f1"))
         {
             contact_require_f1 = settings["contact_require_f1"];
@@ -101,6 +106,7 @@ void launchFoxglove(std::string config_filename) {
     cout << "    offset_z:" << offset_z << endl;
     cout << "    pressure_device_port:" << pressure_port << endl;
     cout << "    minimum_contact_force:" << min_contact_force << endl;
+    cout << "    use_hardware_contact:" << use_hardware_contact << endl;
     cout << "    contact_require_f1:" << contact_require_f1 << endl;
     cout << "    contact_require_f2:" << contact_require_f2 << endl;
     cout << "    contact_require_f3:" << contact_require_f3 << endl;
@@ -127,6 +133,7 @@ void launchFoxglove(std::string config_filename) {
 
     SerialForce serialForce{fgInterface};    
     serialForce.init(std::move(pressure_port), min_contact_force);
+    serialForce.setUseHardwareContact(use_hardware_contact);
     serialForce.setRequireSensor(contact_require_f1, contact_require_f2, contact_require_f3, contact_require_f4);
     long long counter = 1;
 
