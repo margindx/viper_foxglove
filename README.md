@@ -37,6 +37,11 @@ reconstruction endpoints are `ENABLED` or `DISABLED` during configuration.
 When Open3D is not compiled in, the mesh reconstruction endpoints (`publishMesh` / `publishMeshModel`) become
 no-ops that log a one-time warning the first time they are called, so nothing else in the program is affected.
 
+This is separate from the [`generate_geometry`](#available-settings) runtime setting, which turns off *all*
+locally-generated geometry (point clouds and the scene trail as well as the mesh). The two compose: with
+`generate_geometry` set to `false` the mesh endpoints return immediately and no Open3D warning is logged,
+since no geometry was asked for in the first place.
+
 The Python code relies on [`foxglove2zmq`](https://github.com/helkebir/foxglove2zmq), which can be installed using
 `pip install foxglove2zmq`. It currently spawns a pull server, but can be set to create a pub-sub server.
 
@@ -95,6 +100,7 @@ partial config file only overrides the fields it specifies.
 | `contact_require_f2` | bool | `true` | Same as above, for force sensor 2. |
 | `contact_require_f3` | bool | `true` | Same as above, for force sensor 3. |
 | `contact_require_f4` | bool | `true` | Same as above, for force sensor 4. |
+| `generate_geometry` | bool | `true` | Generate point clouds, the mesh, and the scene trail locally. Set to `false` when a downstream component generates them instead; raw poses, TF, and forces are published either way. |
 
 > Note: the built-in default for `offset_x` is `0.150`, while the sample `viper-config.json` ships with
 > `0.157`.

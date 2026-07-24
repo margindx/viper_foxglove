@@ -241,6 +241,12 @@ class FoxgloveInterface {
     std::vector<mdx::Point6d> pointsAll_;
     std::vector<mdx::Point6d> pointsContact_;
 
+    // When false, this application does not generate locally-derived geometry
+    // (point clouds, mesh, and the Viper scene trail) — a downstream component
+    // does. Set once at startup before the Viper starts streaming; read-only
+    // thereafter. Raw poses/TF/forces are unaffected.
+    bool generateGeometry_ = true;
+
     std::mutex meshMtx_;
 #ifdef MDX_WITH_OPEN3D
     std::shared_ptr<open3d::geometry::TriangleMesh> mesh_;
@@ -541,7 +547,12 @@ public:
         return timestamp;
     }
 
+    void setGenerateGeometry(bool enabled) { generateGeometry_ = enabled; }
+    bool generateGeometry() const { return generateGeometry_; }
+
     void publishPointClouds() {
+        if (!generateGeometry_) return;
+
         auto timestamp = getTimestamp();
 
         auto pcAll = *makePointCloud(pointsAll_);
@@ -565,10 +576,15 @@ public:
     }
 #endif
 
-    // Mesh reconstruction requires Open3D. When the project is built without it
-    // (MDX_WITH_OPEN3D undefined) these endpoints are compiled to no-ops that
-    // warn once, so callers do not need to be aware of the build configuration.
+    // Mesh reconstruction is gated twice, independently:
+    //  - generateGeometry_ (runtime): the operator opted out because a
+    //    downstream component generates geometry. A silent no-op.
+    //  - MDX_WITH_OPEN3D (compile time): mesh reconstruction requires Open3D.
+    //    A no-op that warns once, since geometry *was* wanted here.
+    // The runtime check comes first so opting out never produces an Open3D
+    // warning about work that was not asked for.
     void publishMesh() {
+        if (!generateGeometry_) return;
 #ifdef MDX_WITH_OPEN3D
 //        mdx::Point6dView pointView{pointsContact_};
         mdx::Point6dView pointView{pointsAll_};
@@ -601,6 +617,7 @@ public:
     }
 
     void publishMeshModel() {
+        if (!generateGeometry_) return;
 #ifdef MDX_WITH_OPEN3D
         foxglove::schemas::ModelPrimitive model;
         {
@@ -740,16 +757,18 @@ public:
     }
 
     void publishPose(foxglove::schemas::PoseInFrame &pose) {
-        auto pointMdx = mdx::Point6d::fromPose(pose);
+        if (generateGeometry_) {
+            auto pointMdx = mdx::Point6d::fromPose(pose);
 
-        {
-            std::lock_guard<std::mutex> guard{pointsAllMtx_};
-            pointsAll_.push_back(pointMdx);
-        }
+            {
+                std::lock_guard<std::mutex> guard{pointsAllMtx_};
+                pointsAll_.push_back(pointMdx);
+            }
 
-        if (hasContact) {
-            std::lock_guard<std::mutex> guard{pointsContactMtx_};
-            pointsContact_.push_back(pointMdx);
+            if (hasContact) {
+                std::lock_guard<std::mutex> guard{pointsContactMtx_};
+                pointsContact_.push_back(pointMdx);
+            }
         }
 
         poseChannel_.value().log(pose);
