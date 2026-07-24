@@ -40,11 +40,20 @@
 #include "DynamicProtobufDecoder.hpp"
 #include "MeshReconstruction.hpp"
 
+// Include what this header actually uses. Several of these previously arrived
+// transitively via Open3D's headers (through MeshReconstruction.hpp), which are
+// absent in a build without Open3D.
 #include <thread>
 #include <mutex>
 #include <optional>
 #include <cmath>
 #include <iomanip>
+#include <memory>
+#include <sstream>
+#include <functional>
+#include <vector>
+#include <string>
+#include <cstddef>
 
 using namespace std::literals::chrono_literals;
 

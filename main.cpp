@@ -15,6 +15,9 @@ using json = nlohmann::json;
 #include <csignal>
 #include <functional>
 #include <filesystem>
+// Needed for std::ifstream below. Previously arrived transitively via Open3D's
+// headers; include it directly so the build works without Open3D.
+#include <fstream>
 
 using namespace std;
 
