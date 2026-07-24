@@ -9,6 +9,7 @@
 #include <mutex>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <iostream>
 #include <thread>
 #include <functional>
@@ -20,7 +21,6 @@ protected:
     int contactFlag_{};
     mutable std::mutex mutex1_, mutex2_, mutex3_, mutex4_, contactMutex_;
     serialib serial_;
-    char buf_[100]{};
 
     mdx::Contact contact_;
     std::optional<std::chrono::time_point<std::chrono::system_clock>> lastContactTime_;
@@ -37,34 +37,61 @@ protected:
     bool _require_sensor_4 = true;
 
     void updateForces_() {
-        char latest[sizeof(buf_)];
+        // Newline-anchored framing: bytes are accumulated and only text delimited
+        // by '\n' on BOTH sides is parsed. This is what guarantees a complete line
+        // — the field-count check alone cannot, because a read that starts partway
+        // through the first field still yields the right number of commas and the
+        // fragment parses as a valid (but wrong) float. See issue #50.
+        constexpr size_t kMaxAccumBytes = 1024;   // resync if this many bytes carry no '\n'
+        std::string acc;
+        char chunk[256];
+        bool sawNewline = false;                   // discarded the initial partial fragment yet?
+
         while (!closed) {
-            // Block for the next complete line.
-            if (serial_.readString(buf_, '\n', 100, 5000) <= 0) {
-                // Timeout (0) or device read error (<0): nothing complete to parse.
+            int n = serial_.readBytes(chunk, sizeof(chunk), 5000);
+            if (n <= 0) {
+                // Timeout or device read error: nothing new this cycle.
                 continue;
             }
+            acc.append(chunk, static_cast<size_t>(n));
 
-            // Advance to the freshest complete line already buffered, dropping any
-            // backlog so contact/force stay low-latency when we can't keep up. We
-            // drain with readString (1 ms, non-blocking in practice) rather than
-            // flushReceiver() so reads stay line-aligned — a blind flush can leave
-            // the next read starting mid-line, which the parser would then reject.
-            // A short-timeout read that finds no further complete line returns <=0
-            // and would clobber its buffer, so drain into a scratch buffer and only
-            // promote a successful read.
-            while (serial_.readString(latest, '\n', 100, 1) > 0) {
-                std::memcpy(buf_, latest, sizeof(buf_));
+            // Everything before the first '\n' we ever see may be a partial first
+            // field — discard it once so all subsequent parsing starts on a real
+            // line boundary. Thereafter acc always begins at a line boundary.
+            if (!sawNewline) {
+                auto first = acc.find('\n');
+                if (first == std::string::npos) {
+                    if (acc.size() > kMaxAccumBytes) acc.clear();
+                    continue;
+                }
+                acc.erase(0, first + 1);
+                sawNewline = true;
             }
+
+            // Parse only whole lines (bounded by '\n' on both sides); keep any
+            // trailing partial for the next read. Drop backlog by parsing just the
+            // freshest complete line, preserving the freshest-only policy.
+            auto lastNl = acc.rfind('\n');
+            if (lastNl == std::string::npos) {
+                if (acc.size() > kMaxAccumBytes) { acc.clear(); sawNewline = false; }
+                continue;   // only a partial line so far
+            }
+            std::string complete = acc.substr(0, lastNl);   // one or more whole lines
+            acc.erase(0, lastNl + 1);                        // retain the trailing partial
+
+            auto prevNl = complete.rfind('\n');
+            std::string line = (prevNl == std::string::npos)
+                                   ? complete
+                                   : complete.substr(prevNl + 1);
 
             std::lock_guard<std::mutex> guard1(mutex1_);
             std::lock_guard<std::mutex> guard2(mutex2_);
             std::lock_guard<std::mutex> guard3(mutex3_);
             std::lock_guard<std::mutex> guard4(mutex4_);
             int contactFlag = 0;
-            int result = sscanf(buf_, "%f,%f,%f,%f,%d\n", &force1_, &force2_, &force3_, &force4_, &contactFlag);
+            int result = sscanf(line.c_str(), "%f,%f,%f,%f,%d", &force1_, &force2_, &force3_, &force4_, &contactFlag);
             if (result != 5) {
-                // Corrupt line — skip it. Reads stay line-aligned, so no flush/resync needed.
+                // Whole line but still malformed (line noise, dropped byte) — skip it.
                 continue;
             }
             contactFlag_ = contactFlag;
