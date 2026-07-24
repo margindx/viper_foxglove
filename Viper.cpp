@@ -51,29 +51,41 @@ void Viper::connect() {
 
 void Viper::readUsb(viper_usb *pvpr) {
     constexpr uint32_t kRespSize = sizeof(uint32_t)*11+sizeof(SENFRAMEDATA)*16+CRC_SIZE; // max no. of sensors
+    // Wide enough that a bulk transfer returns a whole frame (ending on its
+    // short-packet boundary) rather than timing out mid-frame; keeps the reads
+    // frame-aligned so each transfer starts on a preamble. No sleep: the read
+    // blocks here up to the timeout, pacing the loop to the device's rate.
+    constexpr unsigned int kReadTimeoutMs = 5;
 
     uint8_t* respPkg = new uint8_t[kRespSize];
     uint32_t br;
-
-    uint32_t timeOut = 200;
-    viper_queue* pqueue;
+    uint64_t misaligned = 0;   // transfers dropped for not starting on a frame boundary
 
     while (keepReading) {
-        br = pvpr->usb_rec_resp(respPkg, kRespSize);
+        br = pvpr->usb_rec_resp(respPkg, kRespSize, kReadTimeoutMs);
 
-        if (br) {
-            if (Viper::hasPnoPreamble(respPkg)) {
-                pqueue = &pnoQueue_;
-                timeOut = 4;
-            } else {
-                pqueue = &cmdQueue_;
+        if (!br)
+            continue;   // nothing arrived within the timeout
+
+        uint32_t preamble = *(uint32_t*) respPkg;
+        if (preamble == VIPER_PNO_PREAMBLE) {
+            pnoQueue_.push(respPkg, br);
+        } else if (preamble == VIPER_CMD_PREAMBLE) {
+            cmdQueue_.push(respPkg, br);
+        } else {
+            // Transfer did not start on a known frame boundary (e.g. a fragment
+            // left over from a mid-frame timeout). Pushing it would corrupt byte
+            // alignment in the queue, so drop it and report periodically.
+            if ((++misaligned % 100) == 1) {
+                std::stringstream ss;
+                ss << "Viper USB read misaligned (" << misaligned
+                   << " transfer(s) dropped): no PNO/CMD preamble at start";
+                fgInterface_->logWarning(ss.str());
             }
-
-            pqueue->push(respPkg, br);
         }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(timeOut));
     }
+
+    delete[] respPkg;
 }
 
 void Viper::startContinuousRead() {

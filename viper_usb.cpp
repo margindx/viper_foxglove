@@ -110,15 +110,15 @@ uint32_t viper_usb::usb_send_cmd(uint8_t* cmd, uint32_t cmd_len){
 }
 
 
-uint32_t viper_usb::usb_rec_resp( uint8_t* resp, uint32_t rec_len){
+uint32_t viper_usb::usb_rec_resp( uint8_t* resp, uint32_t rec_len, unsigned int timeout_ms){
 
   uint32_t br;
   // const char* p;
   //int i;
 
   br=0;
-  libusb_bulk_transfer(m_usbdev, IN_EP, resp, rec_len,(int*) &br, 1);
-  
+  libusb_bulk_transfer(m_usbdev, IN_EP, resp, rec_len,(int*) &br, timeout_ms);
+
 
   return br;
 }
