@@ -130,7 +130,8 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         FoxgloveUtility.hpp
         FoxgloveMacros.hpp
         DynamicProtobufDecoder.cpp
-        DynamicProtobufDecoder.hpp)
+        DynamicProtobufDecoder.hpp
+        UsbSerialPort.hpp)
 # VPif.h VPif.cpp VPcmdDefs.h
 
 # viper_ui.cpp uses POSIX-only headers (unistd.h, termios.h); exclude on Windows
@@ -145,7 +146,8 @@ if(WIN32)
     # ws2_32:   Windows Sockets 2 (required by the pre-built Foxglove Rust library)
     # ntdll:    NT kernel APIs (NtCancelIoFileEx, NtDeviceIoControlFile, etc.) used by mio/tokio
     # userenv:  GetUserProfileDirectoryW used by Rust std::env::home_dir
-    target_link_libraries(viper PRIVATE ws2_32 ntdll userenv)
+    # setupapi: SetupDi* device enumeration used by UsbSerialPort.hpp (VID/PID port detect)
+    target_link_libraries(viper PRIVATE ws2_32 ntdll userenv setupapi)
 endif()
 
 # Include libusb headers

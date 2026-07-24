@@ -3,6 +3,7 @@
 #include "Viper.hpp"
 #include "SerialForce.hpp"
 #include "FoxgloveInterface.hpp"
+#include "UsbSerialPort.hpp"
 
 #include "foxglove/foxglove.hpp"
 
@@ -45,6 +46,7 @@ void launchFoxglove(std::string config_filename) {
     bool contact_require_f2 = true;
     bool contact_require_f3 = true;
     bool contact_require_f4 = true;
+    bool pressure_autodetect = true;
     std::string &&pressure_port = "/dev/ttyACM0";
 
     if (std::filesystem::exists(config_filename))
@@ -92,6 +94,10 @@ void launchFoxglove(std::string config_filename) {
         {
             contact_require_f4 = settings["contact_require_f4"];
         }
+        if (settings.contains("pressure_autodetect"))
+        {
+            pressure_autodetect = settings["pressure_autodetect"];
+        }
 
         cout << "    Done parsing.\n";
     }
@@ -111,7 +117,26 @@ void launchFoxglove(std::string config_filename) {
     cout << "    contact_require_f2:" << contact_require_f2 << endl;
     cout << "    contact_require_f3:" << contact_require_f3 << endl;
     cout << "    contact_require_f4:" << contact_require_f4 << endl;
+    cout << "    pressure_autodetect:" << pressure_autodetect << endl;
     // ---- End of runtime config parsing ---- //
+
+    // Resolve the pressure-sensor port. When enabled, prefer auto-detection by
+    // USB VID/PID (Seeed 2886:8064) so a renumbered COM port is found without
+    // guessing; fall back to the configured pressure_device_port if detection
+    // finds no unique match (or on a platform without a backend). Detection
+    // reads USB descriptors only — it never opens a port. See #52.
+    if (pressure_autodetect) {
+        constexpr std::uint16_t kPressureVid = 0x2886;
+        constexpr std::uint16_t kPressurePid = 0x8064;
+        auto detected = mdx::usb::findPortByUsbId(kPressureVid, kPressurePid);
+        if (detected) {
+            cout << "    Auto-detected pressure sensor at " << *detected << endl;
+            pressure_port = *detected;
+        } else {
+            cout << "    Auto-detect found no unique VID:PID match; using pressure_device_port: "
+                 << pressure_port << endl;
+        }
+    }
 
     std::filesystem::path mcapPath = "viper.mcap";
     std::filesystem::remove(mcapPath);

@@ -8,7 +8,8 @@
     "contact_require_f1": true,
     "contact_require_f2": true, 
     "contact_require_f3": true, 
-    "contact_require_f4": true, 
+    "contact_require_f4": true,
+    "pressure_autodetect": true,
     "_comment": {
         "offset_x": "along-probe offset from sensor to tip",
         "offset_y": "horizontal offset from sensor to probe center (keep at 0)",
@@ -19,6 +20,7 @@
         "contact_require_f1": "Whether force sensor 1 is required to be above minimum_contact_force (only used when use_hardware_contact is false)",
         "contact_require_f2": "Whether force sensor 2 is required to be above minimum_contact_force", 
         "contact_require_f3": "Whether force sensor 3 is required to be above minimum_contact_force", 
-        "contact_require_f4": "Whether force sensor 4 is required to be above minimum_contact_force"
+        "contact_require_f4": "Whether force sensor 4 is required to be above minimum_contact_force",
+        "pressure_autodetect": "If true, auto-detect the pressure sensor's port by USB VID:PID (2886:8064) and fall back to pressure_device_port if there is not exactly one match; Windows only, otherwise uses pressure_device_port"
     }
 }
