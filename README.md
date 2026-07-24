@@ -17,9 +17,25 @@ legacy probe design, and will require a small update once the EM sensor module f
 The C++ program has the following dependencies:
 
 - `Foxglove`
-- `Open3D`
 - `Protobuf`
 - `libusb`
+- `Open3D` (**optional** — only needed for mesh reconstruction; see [Open3D (optional)](#open3d-optional))
+
+### Open3D (optional)
+
+Open3D is only used by the mesh reconstruction endpoints, which are not currently exercised by the main loop.
+The program compiles and runs fine without it. Whether Open3D is used is controlled by the `MDX_WITH_OPEN3D`
+CMake cache variable:
+
+- `AUTO` (default) — use Open3D if CMake can find it, otherwise build without it.
+- `ON` — require Open3D; configuration fails if it is not found.
+- `OFF` — never use Open3D, even if it is installed.
+
+Set it at configure time, e.g. `cmake --preset=default -DMDX_WITH_OPEN3D=OFF`. CMake prints whether the mesh
+reconstruction endpoints are `ENABLED` or `DISABLED` during configuration.
+
+When Open3D is not compiled in, the mesh reconstruction endpoints (`publishMesh` / `publishMeshModel`) become
+no-ops that log a one-time warning the first time they are called, so nothing else in the program is affected.
 
 The Python code relies on [`foxglove2zmq`](https://github.com/helkebir/foxglove2zmq), which can be installed using
 `pip install foxglove2zmq`. It currently spawns a pull server, but can be set to create a pub-sub server.
@@ -124,7 +140,13 @@ Mode LastWriteTime Length Name
 ```
 
 
-### 3. Install Open3D 
+### 3. Install Open3D (optional)
+
+Open3D is only required for the mesh reconstruction endpoints. If you don't need them, skip this step — the
+build will automatically proceed without Open3D (or pass `-DMDX_WITH_OPEN3D=OFF` at configure time to be
+explicit). See [Open3D (optional)](#open3d-optional) above for details.
+
+To build with Open3D support:
 
 1. Go to https://github.com/isl-org/Open3D/releases , go to the assets of the release you want (we are using 0.19.0 as of 4/16/2026) and download the `open3d-devel-windows-amd64-0.19.0.zip`
 2. Unpack that zip and put it somewhere nice. 
