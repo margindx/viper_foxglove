@@ -23,9 +23,25 @@ void viper_queue::init(uint32_t* pi){
   keep_on=pi;
 }
 
+void viper_queue::set_max_bytes(size_t max_bytes){
+  lock_guard<mutex> lock(mut);
+  max_bytes_=max_bytes;
+}
+
 void viper_queue::push(uint8_t* data,uint32_t count){
   uint32_t i;
   lock_guard<mutex> lock(mut);
+
+  // Backpressure: if the consumer has fallen behind and the backlog would
+  // exceed the cap, drop the buffered backlog and keep only this newest frame.
+  // Safe because callers push whole, preamble-aligned transfers, so the queue
+  // stays frame-aligned after a clear.
+  if (data_queue.size()+count > max_bytes_){
+    queue<uint8_t>().swap(data_queue);
+    if ((++dropped_ % 100)==1)
+      cerr << "viper_queue: backlog over " << max_bytes_
+           << " bytes; dropped buffered frames (" << dropped_ << " event(s))" << endl;
+  }
 
   for (i=0;i<count;i++)
 	 data_queue.push(data[i]);

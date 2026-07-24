@@ -15,7 +15,7 @@ public:
 	void usb_disconnect();
 
 	uint32_t usb_send_cmd(uint8_t* cmd, uint32_t cmd_len);
-	uint32_t usb_rec_resp( uint8_t* resp, uint32_t rec_len);
+	uint32_t usb_rec_resp( uint8_t* resp, uint32_t rec_len, unsigned int timeout_ms = 1);
        
 
 private:
