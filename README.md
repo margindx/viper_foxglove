@@ -25,6 +25,72 @@ The Python code relies on [`foxglove2zmq`](https://github.com/helkebir/foxglove2
 `pip install foxglove2zmq`. It currently spawns a pull server, but can be set to create a pub-sub server.
 
 
+## Runtime configuration
+
+The C++ program reads its runtime settings from a JSON config file. A sample file, `viper-config.json`, is
+included at the repo root and documents each field in its `_comment` block. Treat this top-level file as an
+example/template — leave it unedited and copy it to where you actually run the program.
+
+### Providing a config file
+
+After building, the `viper` executable lives in a build directory (e.g. `build/Release/viper.exe` on Windows).
+By default the program looks for a file named `viper-config.json` in the current working directory. The typical
+workflow is:
+
+1. Copy the top-level `viper-config.json` into the build directory next to the executable.
+2. Edit that copy to set the values you need.
+3. Run the program from that directory so it picks up the copied config.
+
+Alternatively, copy `viper-config.json` anywhere you like, edit it, and pass its path as the first
+command-line argument:
+
+```
+# uses ./viper-config.json from the current directory
+./viper            # (Windows: .\viper.exe)
+
+# uses a specific file
+./viper /path/to/my-config.json
+```
+
+On startup the program prints which file it parsed (or that no file was found) and echoes the full set of
+runtime settings it is using, so you can confirm the values took effect.
+
+### What happens if no config file is found
+
+The program does **not** search for or resolve any alternate config file. It checks exactly one path — either
+`viper-config.json` in the working directory, or the path you passed as an argument. If that file does not
+exist, it prints `No config file found. using default values` and runs entirely on the built-in defaults
+compiled into the program.
+
+Parsing is also field-by-field: any key omitted from the config file falls back to its built-in default, so a
+partial config file only overrides the fields it specifies.
+
+### Available settings
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `offset_x` | float | `0.150` | Along-probe offset from sensor to tip (meters). |
+| `offset_y` | float | `0.0` | Horizontal offset from sensor to probe center (keep at 0). |
+| `offset_z` | float | `0.0` | Horizontal offset from sensor to probe center (keep at 0). |
+| `minimum_contact_force` | float | `0.35` | Force threshold above which contact is registered (only used when `use_hardware_contact` is `false`). |
+| `pressure_device_port` | string | `/dev/ttyACM0` | USB device port for the pressure/force sensor. |
+| `use_hardware_contact` | bool | `true` | If `true`, use the 0/1 contact flag reported by the device; if `false`, derive contact from the force thresholds and `contact_require_fN` flags. |
+| `contact_require_f1` | bool | `true` | Whether force sensor 1 must exceed `minimum_contact_force` for contact (only used when `use_hardware_contact` is `false`). |
+| `contact_require_f2` | bool | `true` | Same as above, for force sensor 2. |
+| `contact_require_f3` | bool | `true` | Same as above, for force sensor 3. |
+| `contact_require_f4` | bool | `true` | Same as above, for force sensor 4. |
+
+> Note: the built-in default for `offset_x` is `0.150`, while the sample `viper-config.json` ships with
+> `0.157`.
+
+### Documenting fields inline
+
+Because JSON has no native comment syntax, `viper-config.json` documents each setting inside a `_comment`
+object that mirrors the field names. The program ignores any keys it doesn't recognize, so this block travels
+with the config and keeps the field descriptions next to the values without affecting parsing. When adding a
+new setting, add a matching entry under `_comment` describing it.
+
+
 ## Windows installation and building notes
 
 
