@@ -11,6 +11,8 @@
 #include <cstring>
 #include <cerrno>
 #include <string>
+#include <vector>
+#include <chrono>
 #include <iostream>
 #include <thread>
 #include <functional>
@@ -42,6 +44,20 @@ protected:
     std::string port_ = "/dev/cu.usbmodem2101";
     size_t connectTries_ = 5;               // extra attempts beyond the first
     unsigned int connectTimeoutMs_ = 200;   // backoff between attempts
+
+    // Read-loop pacing. The loop reads only bytes that are already buffered, so
+    // this poll interval — not a fixed read size — bounds the added latency.
+    static constexpr unsigned int kReadPollMs_ = 1;
+    // An unplugged USB serial device often just stops delivering bytes without
+    // ever returning a read error, so treat a long silence as a dead link and
+    // let the reconnect path re-open the port.
+    static constexpr unsigned int kReadStallMs_ = 5000;
+    // More whole lines than this arriving in one poll means we are genuinely
+    // behind, not merely batching; then, and only then, skip to the freshest.
+    static constexpr size_t kMaxBatchLines_ = 16;
+    // Dropped-backlog warnings are throttled to this interval: a sustained
+    // overrun would otherwise log on every poll.
+    static constexpr unsigned int kDropLogIntervalMs_ = 1000;
 
     // Human-readable description of the last OS-level error from a serial call.
     // serialib uses Win32 on Windows (which reports via GetLastError, NOT errno)
@@ -95,6 +111,27 @@ protected:
         return false;
     }
 
+    // Parse one whole line and publish it. Caller guarantees the line is bounded
+    // by '\n' on both sides; a line that still fails to parse is dropped.
+    void processLine_(const std::string &line) {
+        std::lock_guard<std::mutex> guard1(mutex1_);
+        std::lock_guard<std::mutex> guard2(mutex2_);
+        std::lock_guard<std::mutex> guard3(mutex3_);
+        std::lock_guard<std::mutex> guard4(mutex4_);
+        int contactFlag = 0;
+        int result = sscanf(line.c_str(), "%f,%f,%f,%f,%d", &force1_, &force2_, &force3_, &force4_, &contactFlag);
+        if (result != 5) {
+            // Whole line but still malformed (line noise, dropped byte) — skip it.
+            return;
+        }
+        contactFlag_ = contactFlag;
+        mdx::RawForce rawForce{force1_, force2_, force3_, force4_};
+
+        updateContact_(rawForce);
+
+        fgInterface_->logRawForce(rawForce);
+    }
+
     void updateForces_() {
         // Newline-anchored framing: bytes are accumulated and only text delimited
         // by '\n' on BOTH sides is parsed. This is what guarantees a complete line
@@ -105,6 +142,9 @@ protected:
         std::string acc;
         char chunk[256];
         bool sawNewline = false;                   // discarded the initial partial fragment yet?
+        auto lastBytesAt = std::chrono::steady_clock::now();
+        size_t droppedSamples = 0;                 // backlog dropped since the last warning
+        auto lastDropLogAt = std::chrono::steady_clock::now();
 
         while (!closed) {
             // (Re)connect if the port isn't open — covers a device that was
@@ -123,9 +163,31 @@ protected:
                 // the first partial fragment is discarded again.
                 acc.clear();
                 sawNewline = false;
+                lastBytesAt = std::chrono::steady_clock::now();
             }
 
-            int n = serial_.readBytes(chunk, sizeof(chunk), 5000);
+            // Read only what is already buffered. readBytes() blocks until its
+            // buffer is FULL (or the timeout expires), so asking for a fixed
+            // sizeof(chunk) would hold ~8 lines hostage for ~20 ms at the sensor
+            // rate before publishing any of them — the throughput cap issue #22
+            // is about. available() is supported on both Win32 and POSIX.
+            const int avail = serial_.available();
+            if (avail <= 0) {
+                if (std::chrono::steady_clock::now() - lastBytesAt
+                    > std::chrono::milliseconds(kReadStallMs_)) {
+                    fgInterface_->logWarning(
+                        "Force sensor sent no data for " + std::to_string(kReadStallMs_)
+                        + " ms; will attempt to reconnect");
+                    serial_.closeDevice();
+                    continue;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(kReadPollMs_));
+                continue;
+            }
+
+            size_t want = static_cast<size_t>(avail);
+            if (want > sizeof(chunk)) want = sizeof(chunk);   // rest is read next iteration
+            int n = serial_.readBytes(chunk, static_cast<unsigned int>(want), kReadStallMs_);
             if (n < 0) {
                 // Negative return is a device-level read error (e.g. unplugged);
                 // drop the connection so the loop above reconnects.
@@ -134,9 +196,10 @@ protected:
                 continue;
             }
             if (n == 0) {
-                // Timeout with no new bytes — nothing to add to the accumulator.
+                // Buffered bytes vanished between available() and the read.
                 continue;
             }
+            lastBytesAt = std::chrono::steady_clock::now();
             acc.append(chunk, static_cast<size_t>(n));
 
             // Everything before the first '\n' we ever see may be a partial first
@@ -153,8 +216,7 @@ protected:
             }
 
             // Parse only whole lines (bounded by '\n' on both sides); keep any
-            // trailing partial for the next read. Drop backlog by parsing just the
-            // freshest complete line, preserving the freshest-only policy.
+            // trailing partial for the next read.
             auto lastNl = acc.rfind('\n');
             if (lastNl == std::string::npos) {
                 if (acc.size() > kMaxAccumBytes) { acc.clear(); sawNewline = false; }
@@ -163,27 +225,35 @@ protected:
             std::string complete = acc.substr(0, lastNl);   // one or more whole lines
             acc.erase(0, lastNl + 1);                        // retain the trailing partial
 
-            auto prevNl = complete.rfind('\n');
-            std::string line = (prevNl == std::string::npos)
-                                   ? complete
-                                   : complete.substr(prevNl + 1);
-
-            std::lock_guard<std::mutex> guard1(mutex1_);
-            std::lock_guard<std::mutex> guard2(mutex2_);
-            std::lock_guard<std::mutex> guard3(mutex3_);
-            std::lock_guard<std::mutex> guard4(mutex4_);
-            int contactFlag = 0;
-            int result = sscanf(line.c_str(), "%f,%f,%f,%f,%d", &force1_, &force2_, &force3_, &force4_, &contactFlag);
-            if (result != 5) {
-                // Whole line but still malformed (line noise, dropped byte) — skip it.
-                continue;
+            std::vector<std::string> lines;
+            for (size_t start = 0; start < complete.size(); ) {
+                size_t nl = complete.find('\n', start);
+                size_t end = (nl == std::string::npos) ? complete.size() : nl;
+                if (end > start) lines.emplace_back(complete, start, end - start);
+                if (nl == std::string::npos) break;
+                start = nl + 1;
             }
-            contactFlag_ = contactFlag;
-            mdx::RawForce rawForce{force1_, force2_, force3_, force4_};
 
-            updateContact_(rawForce);
-
-            fgInterface_->logRawForce(rawForce);
+            // Publish every sample while keeping up (the point of issue #22); only
+            // a genuine backlog is dropped in favour of the freshest sample, which
+            // keeps contact/force latency bounded when the consumer can't keep up.
+            if (lines.size() > kMaxBatchLines_) {
+                droppedSamples += lines.size() - 1;
+                lines.erase(lines.begin(), lines.end() - 1);
+            }
+            if (droppedSamples > 0) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - lastDropLogAt > std::chrono::milliseconds(kDropLogIntervalMs_)) {
+                    fgInterface_->logWarning(
+                        "Force sensor reader fell behind; dropped "
+                        + std::to_string(droppedSamples) + " backlogged samples");
+                    droppedSamples = 0;
+                    lastDropLogAt = now;
+                }
+            }
+            for (const std::string &line : lines) {
+                processLine_(line);
+            }
         }
     }
 
