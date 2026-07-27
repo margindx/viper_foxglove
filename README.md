@@ -7,6 +7,13 @@ This code contains two separate programs:
    2. Data from the custom nRF52840 microcontroller-based force sensing board
 2. A minimal relay script in Python using a custom-developed Foxglove to ZMQ relay library ([`foxglove2zmq`](https://github.com/helkebir/foxglove2zmq)).
 
+## `foxglove2zmq`
+
+The Python code relies on [`foxglove2zmq`](https://github.com/helkebir/foxglove2zmq), which can be installed using
+`pip install foxglove2zmq`. It currently spawns a pull server, but can be set to create a pub-sub server.
+
+## C++ viper.exe
+
 The C++ program is set up to try to connect to a Polhemus Viper module. In the `main` function, the force sensing
 functionality is currently commented out since it relies on the presence of a force module.
 
@@ -14,6 +21,8 @@ For the probe positioning functionality, a rigid transformation is currently har
 and to translate the resulting position along the axial direction to get the probe tip position. This is based on the
 legacy probe design, and will require a small update once the EM sensor module for the mid-size probe is designed.
 
+
+### Requirements
 The C++ program has the following dependencies:
 
 - `Foxglove`
@@ -21,7 +30,7 @@ The C++ program has the following dependencies:
 - `libusb`
 - `Open3D` (**optional** — only needed for mesh reconstruction; see [Open3D (optional)](#open3d-optional))
 
-### Open3D (optional)
+#### Open3D (optional)
 
 Open3D is only used by the mesh reconstruction endpoints, which are not currently exercised by the main loop.
 The program compiles and runs fine without it. Whether Open3D is used is controlled by the `MDX_WITH_OPEN3D`
@@ -42,17 +51,13 @@ locally-generated geometry (point clouds and the scene trail as well as the mesh
 `generate_geometry` set to `false` the mesh endpoints return immediately and no Open3D warning is logged,
 since no geometry was asked for in the first place.
 
-The Python code relies on [`foxglove2zmq`](https://github.com/helkebir/foxglove2zmq), which can be installed using
-`pip install foxglove2zmq`. It currently spawns a pull server, but can be set to create a pub-sub server.
-
-
-## Runtime configuration
+### Runtime configuration
 
 The C++ program reads its runtime settings from a JSON config file. A sample file, `viper-config.json`, is
 included at the repo root and documents each field in its `_comment` block. Treat this top-level file as an
 example/template — leave it unedited and copy it to where you actually run the program.
 
-### Providing a config file
+#### Providing a config file
 
 After building, the `viper` executable lives in a build directory (e.g. `build/Release/viper.exe` on Windows).
 By default the program looks for a file named `viper-config.json` in the current working directory. The typical
@@ -76,7 +81,7 @@ command-line argument:
 On startup the program prints which file it parsed (or that no file was found) and echoes the full set of
 runtime settings it is using, so you can confirm the values took effect.
 
-### What happens if no config file is found
+#### What happens if no config file is found
 
 The program does **not** search for or resolve any alternate config file. It checks exactly one path — either
 `viper-config.json` in the working directory, or the path you passed as an argument. If that file does not
@@ -86,7 +91,7 @@ compiled into the program.
 Parsing is also field-by-field: any key omitted from the config file falls back to its built-in default, so a
 partial config file only overrides the fields it specifies.
 
-### Available settings
+#### Available settings
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -105,7 +110,7 @@ partial config file only overrides the fields it specifies.
 > Note: the built-in default for `offset_x` is `0.150`, while the sample `viper-config.json` ships with
 > `0.157`.
 
-### Documenting fields inline
+#### Documenting fields inline
 
 Because JSON has no native comment syntax, `viper-config.json` documents each setting inside a `_comment`
 object that mirrors the field names. The program ignores any keys it doesn't recognize, so this block travels
@@ -113,12 +118,12 @@ with the config and keeps the field descriptions next to the values without affe
 new setting, add a matching entry under `_comment` describing it.
 
 
-## Windows installation and building notes
+## Windows installation and building notes for viper.exe
 
 
-### 1. Install Build Tools for VS Code 
+### 1. Install Build Tools for VS Code
 
-Install [Build Tools for VS Code](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2026) (which includes the `vcpkg` C/C++ package manager).  Defaults for a C/C++ workflow are fine. Also install VS Code if it's not there. 
+Install [Build Tools for VS Code](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2026) (which includes the `vcpkg` C/C++ package manager).  Defaults for a C/C++ workflow are fine. Also install VS Code if it's not there.
 
 (may require a restart)
 
@@ -130,7 +135,7 @@ Find the path where `vcpkg` is installed by running the following command from a
 ```
 Get-ChildItem C:\ -recurse -include "vcpkg.exe"
 ```
-  
+
 
 You'll get a lot of permission-denied errors, but you should also see a positive match similar to:
 
@@ -155,12 +160,12 @@ explicit). See [Open3D (optional)](#open3d-optional) above for details.
 To build with Open3D support:
 
 1. Go to https://github.com/isl-org/Open3D/releases , go to the assets of the release you want (we are using 0.19.0 as of 4/16/2026) and download the `open3d-devel-windows-amd64-0.19.0.zip`
-2. Unpack that zip and put it somewhere nice. 
+2. Unpack that zip and put it somewhere nice.
 3. Set a new environment variable `Open3D_DIR` that points to the `CMake` subdirectory of `open3d-devel-windows-amd64-0.19.0`. e.g., on the 3017 pc: `C:\Users\dx\Documents\open3d-devel-windows-amd64-0.19.0\open3d-devel-windows-amd64-0.19.0\CMake`. (In windows, to set an env variable via a GUI: open start/search then search for "Edit the system environment" and open it. Click "Envionrment Variables..." and add a new one. )
 
 ### 4. Configure and Build viper_foxglove
 
-#### Source configuration 
+#### Source configuration
 
 1. From the `viper_foxglove` git repo, check out the `u/mxk62/win` branch
 2. Modify the `VCPKG_ROOT` field in `CMakeUserPresets.json` to point to the `vcpkg` install path (from step 2 above). On the 3017 PC, this file looks like:
@@ -182,7 +187,7 @@ To build with Open3D support:
 
 #### Building
 
-**VERY IMPORTANT**: do not use a plain powershell. After installing the Build Tools, you'll have command prompts available that handle the environment setup needed to access the various tools. 
+**VERY IMPORTANT**: do not use a plain powershell. After installing the Build Tools, you'll have command prompts available that handle the environment setup needed to access the various tools.
 
 1. Open a  `x64 Native Tools Command Prompt for VS`  (start typing that in the search bar and it should pop up)
 2. `cd` to your `viper_foxglove` directory (e.g., `cd  C:\Users\dx\git\viper_foxglove` )
