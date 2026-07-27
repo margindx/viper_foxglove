@@ -15,8 +15,6 @@ using json = nlohmann::json;
 #include <csignal>
 #include <functional>
 #include <filesystem>
-// Needed for std::ifstream below. Previously arrived transitively via Open3D's
-// headers; include it directly so the build works without Open3D.
 #include <fstream>
 
 using namespace std;
@@ -70,7 +68,7 @@ void launchFoxglove(std::string config_filename) {
         }
         if (settings.contains("minimum_contact_force"))
         {
-            min_contact_force = settings["minimum_contact_force"];            
+            min_contact_force = settings["minimum_contact_force"];
         }
         if (settings.contains("pressure_device_port"))
         {
@@ -143,7 +141,7 @@ void launchFoxglove(std::string config_filename) {
     viper.setOffset(offset_x, offset_y, offset_z); // slim: (0.150, 0, 0); YOP: (0.157, 0, 0)
     viper.initTransforms();
 
-    SerialForce serialForce{fgInterface};    
+    SerialForce serialForce{fgInterface};
     serialForce.init(std::move(pressure_port), min_contact_force);
     serialForce.setUseHardwareContact(use_hardware_contact);
     serialForce.setRequireSensor(contact_require_f1, contact_require_f2, contact_require_f3, contact_require_f4);
