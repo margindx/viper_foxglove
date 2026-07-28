@@ -120,6 +120,8 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         SensorData.hpp
         ProbeProfile.cpp
         ProbeProfile.hpp
+        FrameUnits.cpp
+        FrameUnits.hpp
         Viper.cpp
         Viper.hpp
         FoxgloveInterface.cpp
@@ -201,8 +203,11 @@ find_package(Catch2 3 CONFIG QUIET)
 if(Catch2_FOUND)
     add_executable(viper_tests
             tests/test_probe_profile.cpp
+            tests/test_frame_units.cpp
             ProbeProfile.cpp
-            ProbeProfile.hpp)
+            ProbeProfile.hpp
+            FrameUnits.cpp
+            FrameUnits.hpp)
 
     target_include_directories(viper_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}

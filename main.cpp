@@ -155,6 +155,14 @@ int launchFoxglove(std::string config_filename) {
     long long counter = 1;
 
     while (!done) {
+        // Raised when the run cannot continue safely -- currently only the
+        // device reporting units this program would misinterpret. Stopping is
+        // the point: carrying on would publish plausible, wrongly-scaled poses.
+        if (viper.hasFatalError()) {
+            cerr << "Stopping: " << viper.fatalErrorMessage() << "\n";
+            return 1;
+        }
+
         if (counter % 300 == 0) {
             viper.initTransforms();
             fgInterface.publishPointClouds();

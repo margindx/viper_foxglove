@@ -14,6 +14,7 @@
 #include "ViperInterface.h"
 #include "SensorData.hpp"
 #include "ProbeProfile.hpp"
+#include "FrameUnits.hpp"
 #include "FoxgloveInterface.hpp"
 
 #include "schema/foxglove/Time_generated.h"
@@ -54,6 +55,26 @@ protected:
     uint64_t noProfileFrames_ = 0;
     uint64_t countMismatchFrames_ = 0;
     uint64_t unusableFrames_ = 0;
+
+    /// The units the device reports are only knowable once a frame arrives, so
+    /// they are checked on the first one rather than at construction.
+    bool unitsChecked_ = false;
+
+    /// Set when the run cannot continue safely. The publish thread stops and
+    /// main is expected to notice and exit non-zero.
+    std::atomic_bool fatalError_{false};
+    std::mutex fatalErrorMtx_;
+    std::string fatalErrorMessage_;
+
+    void raiseFatalError(const std::string &message) {
+        {
+            std::lock_guard<std::mutex> guard{fatalErrorMtx_};
+            fatalErrorMessage_ = message;
+        }
+        fgInterface_->logError("Fatal: " + message);
+        std::cerr << "Fatal: " << message << std::endl;
+        fatalError_ = true;
+    }
 
     flatbuffers::FlatBufferBuilder fbBuilder_;
     FoxgloveInterface *fgInterface_;
@@ -180,6 +201,15 @@ public:
     void initPoseInFrame() {
         hhPose_.frame_id = "viper";
         posesInFrame_.frame_id = "viper";
+    }
+
+    /// True when the run has hit a condition it cannot continue safely from,
+    /// e.g. the device reporting units this program would misinterpret.
+    bool hasFatalError() const { return fatalError_; }
+
+    std::string fatalErrorMessage() {
+        std::lock_guard<std::mutex> guard{fatalErrorMtx_};
+        return fatalErrorMessage_;
     }
 
     void connect();
