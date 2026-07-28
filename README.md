@@ -73,7 +73,7 @@ partial config file only overrides the fields it specifies.
 | `offset_y` | float | `0.0` | Horizontal offset from sensor to probe center (keep at 0). |
 | `offset_z` | float | `0.0` | Horizontal offset from sensor to probe center (keep at 0). |
 | `minimum_contact_force` | float | `0.35` | Force threshold above which contact is registered (only used when `use_hardware_contact` is `false`). |
-| `pressure_device_port` | string | `/dev/ttyACM0` | USB device port for the pressure/force sensor. |
+| `pressure_usb_id` | string | *(none — required)* | USB `VID:PID` (hex) of the pressure/force sensor, e.g. `"2886:8064"`. The serial port is **auto-detected** by matching this against connected USB devices (**Windows and Linux only**). There is no explicit-port option and no fallback: if the value is missing, malformed, or does not match **exactly one** connected device, the force sensor is disabled. See [Finding the force sensor's VID/PID](#finding-the-force-sensors-vidpid). |
 | `use_hardware_contact` | bool | `true` | If `true`, use the 0/1 contact flag reported by the device; if `false`, derive contact from the force thresholds and `contact_require_fN` flags. |
 | `contact_require_f1` | bool | `true` | Whether force sensor 1 must exceed `minimum_contact_force` for contact (only used when `use_hardware_contact` is `false`). |
 | `contact_require_f2` | bool | `true` | Same as above, for force sensor 2. |
@@ -82,6 +82,48 @@ partial config file only overrides the fields it specifies.
 
 > Note: the built-in default for `offset_x` is `0.150`, while the sample `viper-config.json` ships with
 > `0.157`.
+
+### Finding the force sensor's VID/PID
+
+Every USB device advertises a 16-bit **Vendor ID** and **Product ID** (each written as 4 hex digits). The
+program identifies the force sensor by these — not by a fixed port name — and auto-detects whichever serial
+port that device currently occupies. The sample `viper-config.json` ships with `"pressure_usb_id": "2886:8064"`,
+which is the custom nRF52840 board (Seeed, VID `2886` / PID `8064`); set it to a different `VID:PID` only if
+your board reports different IDs.
+
+Enter the value as `"VID:PID"` in hex, e.g. `"2886:8064"` (case-insensitive; a `0x` prefix is also accepted).
+Detection is passive — it reads USB descriptors and never opens any port, so it cannot disturb devices other
+applications are using — and it is deliberately strict: it uses the port **only** when exactly one connected
+device matches, otherwise the sensor stays disabled and the program keeps looking in the background.
+
+**Windows**
+
+1. Open **Device Manager** and find the board (under **Ports (COM & LPT)**, or **Universal Serial Bus devices**).
+2. Right-click it → **Properties** → **Details** tab.
+3. In the **Property** dropdown choose **Hardware Ids** (or **Device instance path**). You'll see a string like
+   `USB\VID_2886&PID_8064&MI_00`. The digits after `VID_` and `PID_` are your VID and PID → `"2886:8064"`.
+
+**Linux**
+
+- Easiest — `lsusb` prints `ID <vid>:<pid>` directly:
+
+  ```
+  $ lsusb
+  Bus 001 Device 005: ID 2886:8064 Seeed Technology Co., Ltd. ...
+  ```
+
+  Here the sensor's `pressure_usb_id` is `"2886:8064"`.
+- Or, from a known device node:
+
+  ```
+  $ udevadm info --name=/dev/ttyACM0 --attribute-walk | grep -m1 -i idVendor
+  $ udevadm info --name=/dev/ttyACM0 --attribute-walk | grep -m1 -i idProduct
+  ```
+
+  (equivalently, read `/sys/class/tty/ttyACM0/device/../idVendor` and `.../idProduct`).
+
+> **macOS:** VID/PID auto-detection is not implemented, so the force sensor is unsupported on macOS (it stays
+> disabled). Windows and Linux only.
 
 ### Documenting fields inline
 
