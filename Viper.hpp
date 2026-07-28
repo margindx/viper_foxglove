@@ -9,6 +9,7 @@
 #include <thread>
 #include <optional>
 #include <mutex>
+#include <atomic>
 #include "viper_usb.h"
 #include "viper_queue.h"
 #include "ViperInterface.h"
@@ -51,6 +52,11 @@ protected:
     const mdx::ProbeProfile *activeProfile_ = nullptr;
     int latchedSensorCount_ = -1;
 
+    /// Sensor count from the most recent frame, independent of whether a
+    /// profile was ever latched. Calibration needs this precisely in the case
+    /// where no profile exists to latch.
+    std::atomic<int> lastSensorCount_{-1};
+
     /// Rate-limiting counters for the repeating fault paths.
     uint64_t noProfileFrames_ = 0;
     uint64_t countMismatchFrames_ = 0;
@@ -59,6 +65,15 @@ protected:
     /// The units the device reports are only knowable once a frame arrives, so
     /// they are checked on the first one rather than at construction.
     bool unitsChecked_ = false;
+
+    /// Calibration runs before a probe has a profile, so the usual "no profile"
+    /// complaint is expected there rather than a fault.
+    bool calibrationMode_ = false;
+
+    /// Most recent fused sensor pose, before any tip transform. This is what
+    /// calibration must solve against: the pose the offset gets added to.
+    std::mutex fusedPoseMtx_;
+    std::optional<mdx::Pose> latestFusedPose_;
 
     /// Set when the run cannot continue safely. The publish thread stops and
     /// main is expected to notice and exit non-zero.
@@ -99,16 +114,20 @@ public:
     /// The profiles must be supplied here rather than through a setter: the
     /// constructor starts the USB read and continuous-publish threads, so a
     /// profile set afterwards would arrive too late for the first frames.
+    /// `calibrationMode` allows construction with no profiles at all, which is
+    /// how a probe that has never been calibrated gets bootstrapped: there is
+    /// no offset to publish yet, but the fused pose is still needed.
     explicit Viper(FoxgloveInterface* fgInterface, std::vector<mdx::ProbeProfile> profiles,
-                   size_t reconnectTries=0, size_t timeOutMs=5) :
-        fbBuilder_(1024), profiles_(std::move(profiles)), fgInterface_(fgInterface), viperUsb{} {
+                   size_t reconnectTries=0, size_t timeOutMs=5, bool calibrationMode=false) :
+        fbBuilder_(1024), profiles_(std::move(profiles)), calibrationMode_(calibrationMode),
+        fgInterface_(fgInterface), viperUsb{} {
         if (fgInterface == nullptr) {
             throw std::runtime_error("FoxgloveInterface delivered as nullptr");
         } else {
             fgInterface_ = fgInterface;
         }
 
-        if (profiles_.empty()) {
+        if (profiles_.empty() && !calibrationMode_) {
             throw std::runtime_error("Viper constructed with no probe profiles");
         }
 
@@ -202,6 +221,20 @@ public:
         hhPose_.frame_id = "viper";
         posesInFrame_.frame_id = "viper";
     }
+
+    /// The most recent fused sensor pose, before any tip transform is applied.
+    /// Empty until the first frame that fuses successfully. This is the pose
+    /// calibration solves against, so that the offset it produces is the offset
+    /// this exact fusion will later have added to it.
+    std::optional<mdx::Pose> latestFusedPose() {
+        std::lock_guard<std::mutex> guard{fusedPoseMtx_};
+        return latestFusedPose_;
+    }
+
+    /// Sensor count from the most recent frame, or -1 before any has arrived.
+    /// Unlike the latched profile count this is available with no profile
+    /// configured, which is the state calibration runs in.
+    int lastSensorCount() const { return lastSensorCount_; }
 
     /// True when the run has hit a condition it cannot continue safely from,
     /// e.g. the device reporting units this program would misinterpret.

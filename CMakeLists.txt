@@ -124,6 +124,12 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         FrameUnits.hpp
         PivotSolve.cpp
         PivotSolve.hpp
+        ProbeConfigIo.cpp
+        ProbeConfigIo.hpp
+        CalibrationSession.cpp
+        CalibrationSession.hpp
+        Calibrate.cpp
+        Calibrate.hpp
         Viper.cpp
         Viper.hpp
         FoxgloveInterface.cpp
@@ -207,12 +213,17 @@ if(Catch2_FOUND)
             tests/test_probe_profile.cpp
             tests/test_frame_units.cpp
             tests/test_pivot_solve.cpp
+            tests/test_calibration_session.cpp
             ProbeProfile.cpp
             ProbeProfile.hpp
             FrameUnits.cpp
             FrameUnits.hpp
             PivotSolve.cpp
-            PivotSolve.hpp)
+            PivotSolve.hpp
+            ProbeConfigIo.cpp
+            ProbeConfigIo.hpp
+            CalibrationSession.cpp
+            CalibrationSession.hpp)
 
     target_include_directories(viper_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}

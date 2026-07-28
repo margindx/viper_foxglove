@@ -1,6 +1,7 @@
 #include <iostream>
 #include "viper_ui.h"
 #include "ProbeProfile.hpp"
+#include "Calibrate.hpp"
 #include "Viper.hpp"
 #include "SerialForce.hpp"
 #include "FoxgloveInterface.hpp"
@@ -184,8 +185,31 @@ int launchFoxglove(std::string config_filename) {
 int main(int argc, char** argv) {
 
     std::string config_filename = "viper-config.json";
-    if (argc > 1){
-        config_filename = argv[1];
+    bool calibrate = false;
+
+    for (int i = 1; i < argc; i++) {
+        const std::string arg = argv[i];
+
+        if (arg == "--calibrate") {
+            calibrate = true;
+        } else if (arg == "--help" || arg == "-h") {
+            cout << "Usage: viper [--calibrate] [config-file]\n\n"
+                 << "  --calibrate   Run the guided probe tip calibration and update the\n"
+                 << "                config. Unlike a normal run this does not require an\n"
+                 << "                existing probe_profiles entry for the connected sensor\n"
+                 << "                count, so a probe can be calibrated for the first time.\n"
+                 << "  config-file   Defaults to viper-config.json in the working directory.\n";
+            return 0;
+        } else {
+            config_filename = arg;
+        }
+    }
+
+    // Calibration deliberately bypasses the probe_profiles requirement: the
+    // whole point is to produce that entry, and the normal path refuses to
+    // start without it.
+    if (calibrate) {
+        return mdx::runCalibration(config_filename);
     }
 
     return launchFoxglove(config_filename);

@@ -352,6 +352,8 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
     // foxglove timestamp
     auto time = foxglove::schemas::Timestamp{static_cast<uint32_t>(sec), static_cast<uint32_t>(nsec)};
 
+    lastSensorCount_ = static_cast<int>(nSensors);
+
     // Pick the probe profile from the number of sensors the SEU is reporting,
     // and latch it. Which probe is fitted is decided by what is plugged in, so
     // the sensor count is the only thing that identifies it.
@@ -366,7 +368,10 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
             // misplaces the tip silently. Refuse, and say why. The raw
             // per-sensor poses are still published below: they need no profile,
             // and they are what you need to diagnose this.
-            if ((++noProfileFrames_ % 100) == 1) {
+            //
+            // Silent during calibration, where having no profile yet is the
+            // entire premise rather than a fault.
+            if (!calibrationMode_ && (++noProfileFrames_ % 100) == 1) {
                 std::stringstream ss;
                 ss << "No probe profile configured for " << nSensors << " sensor(s); "
                    << "not publishing a tip pose. Configured profiles:";
@@ -545,13 +550,22 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
     // Fuse the sensors into one pose, then map that onto the probe tip. With a
     // single sensor the fusion is a pass-through, so the tip pose is that
     // sensor's own pose with the profile's transform applied.
-    // Without a profile there is no trustworthy offset, so no tip pose is
-    // published. That case was already reported above; the raw per-sensor poses
-    // still go out below either way.
-    if (activeProfile_ != nullptr) {
-        const std::optional<mdx::Pose> fused = mdx::fusePoses(sensorPoses);
+    // Fuse unconditionally, whether or not a profile is available. Calibration
+    // runs precisely when there is no profile yet, and the fused pose is what
+    // it has to solve against -- deriving it any other way would calibrate one
+    // estimator and deploy another.
+    const std::optional<mdx::Pose> fused = mdx::fusePoses(sensorPoses);
 
-        if (fused.has_value()) {
+    if (fused.has_value()) {
+        {
+            std::lock_guard<std::mutex> guard{fusedPoseMtx_};
+            latestFusedPose_ = fused;
+        }
+
+        // Without a profile there is no trustworthy offset, so no tip pose is
+        // published. That was reported above; the raw per-sensor poses still go
+        // out below either way.
+        if (activeProfile_ != nullptr) {
             const auto tipPose = toFoxglovePose(mdx::applyTipTransform(fused.value(), activeProfile_->tip));
             auto swingTwist = computeSwingTwist(tipPose);
 
@@ -563,15 +577,15 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
 
             fgInterface_->publishPose(poseInFrame);
             fgInterface_->logSwingTwist(swingTwist);
-        } else if ((++unusableFrames_ % 100) == 1) {
-            // A non-finite or non-unit-norm reading. The raw per-sensor poses
-            // are still published below so the bad frames stay visible in the
-            // MCAP for diagnosis.
-            std::stringstream ss;
-            ss << "Dropped a PNO frame with unusable sensor data (" << unusableFrames_
-               << " frame(s) so far): no tip pose published for it";
-            fgInterface_->logWarning(ss.str());
         }
+    } else if ((++unusableFrames_ % 100) == 1) {
+        // A non-finite or non-unit-norm reading. The raw per-sensor poses are
+        // still published below so the bad frames stay visible in the MCAP for
+        // diagnosis.
+        std::stringstream ss;
+        ss << "Dropped a PNO frame with unusable sensor data (" << unusableFrames_
+           << " frame(s) so far): no tip pose published for it";
+        fgInterface_->logWarning(ss.str());
     }
 
     auto posesInFrame = foxglove::schemas::PosesInFrame{

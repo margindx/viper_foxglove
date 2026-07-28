@@ -73,7 +73,7 @@ to its built-in default.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `probe_profiles` | array | *(none — required)* | One entry per probe design, keyed by how many EM sensors it presents. See [Probe profiles](#probe-profiles). |
+| `probe_profiles` | array | *(none — required)* | One entry per probe design, keyed by how many EM sensors it presents. See [Probe profiles](#probe-profiles) and [Calibrating the tip offset](#calibrating-the-tip-offset). |
 | `minimum_contact_force` | float | `0.35` | Force threshold above which contact is registered (only used when `use_hardware_contact` is `false`). |
 | `pressure_device_port` | string | `/dev/ttyACM0` | USB device port for the pressure/force sensor. |
 | `use_hardware_contact` | bool | `true` | If `true`, use the 0/1 contact flag reported by the device; if `false`, derive contact from the force thresholds and `contact_require_fN` flags. |
@@ -81,6 +81,20 @@ to its built-in default.
 | `contact_require_f2` | bool | `true` | Same as above, for force sensor 2. |
 | `contact_require_f3` | bool | `true` | Same as above, for force sensor 3. |
 | `contact_require_f4` | bool | `true` | Same as above, for force sensor 4. |
+
+### Required Viper device settings
+
+The SEU must be configured to report **metres** and **quaternions**. These are persistent device settings,
+and both Polhemus factory defaults (inches, Euler degrees) are wrong for this program:
+
+- Positions are treated as metres everywhere — `tip_offset_m`, the published frames, the point clouds. A
+  device left on inches would rescale all of it by 39.37.
+- Orientations are read as `(w, x, y, z)`. In either Euler mode the fourth value is unused and the first
+  three are azimuth/elevation/roll, so the same four floats become a meaningless rotation.
+
+Neither mistake announces itself, so the program reads the units from the first frame and **refuses to run**
+on anything else, naming what the device reported and what is required. On the good path it logs the detected
+units once at startup. Nothing here ever *sets* the units — use `CMD_UNITS` on the device.
 
 ### Probe profiles
 
@@ -131,6 +145,59 @@ Two failure cases are reported rather than guessed at:
 - **The sensor count changes mid-run** (typically an intermittent connector). The originally latched profile
   stays in effect — the tip offset does not shift under the operator mid-experiment — and a rate-limited error
   is logged saying the published tip pose is no longer trustworthy. Check the connections and restart.
+
+#### Calibrating the tip offset
+
+`tip_offset_m` can be measured from the mechanical design, or solved for from the probe's own motion:
+
+```
+./viper --calibrate            # (Windows: .\viper.exe --calibrate)
+./viper --calibrate /path/to/my-config.json
+```
+
+This is a **bench procedure**, run at the machine the Viper is attached to. Unlike a normal run it does
+**not** require an existing `probe_profiles` entry for the connected sensor count — producing that entry is
+the point, so a probe can be calibrated for the first time. It writes to the same config file it read.
+
+You need a flat surface and a straightedge. There are three captures, and the program will not let you leave
+one until the data can actually support a solve — it shows live what is still missing.
+
+1. **Tip pivot.** Rest the tip on the surface, hold that spot, and rock the probe through as wide a range of
+   angles as you can without letting the tip slide. Vary the *direction* of tilt, not just how far: a sweep
+   confined to one plane is ill-conditioned however long you run it. This solves the tip offset.
+2. **Flat placements.** Lay the imaging face flat on the surface, lift, rotate about the probe's own axis,
+   and set it down flat again. Repeat at many rotations. Keep the face flat — do not tilt. This solves the
+   face normal.
+3. **Straightedge.** With the face still flat, butt its long (10 mm) edge against a straightedge and reseat a
+   few times. This solves the footprint long axis, which together with the face normal gives the full tip
+   rotation.
+
+The result is printed with its residuals before anything is written, and you are asked to confirm. The
+rotation is confirmed separately, so you can accept a new offset while leaving the orientation alone. The
+previous config is copied to `viper-config.<timestamp>.bak` and the new one is written atomically, so an
+interrupted write cannot leave a truncated file that the next normal run would refuse to start on.
+
+##### Reading the residuals
+
+The tip is a 10 × 1 mm **face**, not a point, and the calibration solves for its centre. As the probe tilts
+during the pivot the contact point migrates across that face, which biases the answer. The bias is
+anisotropic — up to about ±5 mm along the footprint but only ±0.5 mm across it — so residuals are reported
+**per axis in the probe frame** rather than as one number:
+
+```
+Residual per axis     [0.31, 2.85, 0.44] mm  (probe frame: x along probe, y along the 10 mm footprint edge)
+```
+
+A large `y` relative to `x` and `z` is the expected signature of contact migration. If the **across**-footprint
+residual is the larger one, something other than migration is wrong and the number should not be trusted.
+
+A second, independent estimate is computed by applying a plane constraint to the same rocking data, using the
+surface normal from step 2. It has a *different* error model, so agreement between the two is evidence and a
+disagreement above 5 mm is flagged as a warning.
+
+Note what calibration cannot do: the flat placements determine orientation only. With the face flat every
+time, the offset along the face normal is perfectly confounded with the unknown position of the surface, so
+those placements carry no information about the translation at all.
 
 #### How the sensors are fused
 
