@@ -564,13 +564,24 @@ public:
 
         auto timestamp = getTimestamp();
 
-        auto pcAll = *makePointCloud(pointsAll_);
-        pcAll.timestamp = timestamp;
-        hhPointsAllChannel_.value().log(pcAll);
+        // Build each cloud while holding the buffer's mutex (the producer thread
+        // appends to these vectors in publishPose), then release before the log()
+        // call so the network/serialization work does not stall the pose thread.
+        std::unique_ptr<foxglove::schemas::PointCloud> pcAll;
+        {
+            std::lock_guard<std::mutex> guard{pointsAllMtx_};
+            pcAll = makePointCloud(pointsAll_);
+        }
+        pcAll->timestamp = timestamp;
+        hhPointsAllChannel_.value().log(*pcAll);
 
-        auto pcContact = *makePointCloud(pointsContact_);
-        pcContact.timestamp = timestamp;
-        hhPointsContactChannel_.value().log(pcContact);
+        std::unique_ptr<foxglove::schemas::PointCloud> pcContact;
+        {
+            std::lock_guard<std::mutex> guard{pointsContactMtx_};
+            pcContact = makePointCloud(pointsContact_);
+        }
+        pcContact->timestamp = timestamp;
+        hhPointsContactChannel_.value().log(*pcContact);
     }
 
 #ifndef MDX_WITH_OPEN3D
@@ -595,9 +606,16 @@ public:
     void publishMesh() {
         if (!generateGeometry_) return;
 #ifdef MDX_WITH_OPEN3D
-//        mdx::Point6dView pointView{pointsContact_};
-        mdx::Point6dView pointView{pointsAll_};
-        auto mesh = mdx::geometry::CreateMesh(pointView.points, pointView.normals);
+        // Point6dView holds Eigen::Maps into pointsAll_'s storage, so hold the
+        // mutex across both the view and CreateMesh — otherwise a concurrent
+        // push_back in publishPose could reallocate the vector out from under it.
+        std::shared_ptr<open3d::geometry::TriangleMesh> mesh;
+        {
+            std::lock_guard<std::mutex> guard{pointsAllMtx_};
+//            mdx::Point6dView pointView{pointsContact_};
+            mdx::Point6dView pointView{pointsAll_};
+            mesh = mdx::geometry::CreateMesh(pointView.points, pointView.normals);
+        }
 
         {
             std::lock_guard<std::mutex> guard{meshMtx_};
