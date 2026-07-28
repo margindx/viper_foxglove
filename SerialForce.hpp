@@ -5,11 +5,15 @@
 #ifndef VIPER_SERIALFORCE_HPP
 #define VIPER_SERIALFORCE_HPP
 
+// UsbSerialPort.hpp pulls in <windows.h> on Windows; include it before the
+// Foxglove headers, whose macro guards neutralize windows.h's ERROR/etc.
+#include "UsbSerialPort.hpp"
 #include "serialib/serialib.h"
 #include <mutex>
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -39,11 +43,24 @@ protected:
     bool _require_sensor_3 = true;
     bool _require_sensor_4 = true;
 
-    // Serial connection parameters, retained for startup and runtime reconnect.
+    // Connection parameters. The port is resolved at (re)connect time by USB
+    // VID/PID rather than hardcoded, so a renumbered node is found automatically.
     static constexpr unsigned int kBaudRate_ = 115200;
-    std::string port_ = "/dev/cu.usbmodem2101";
+    std::uint16_t vid_ = 0, pid_ = 0;       // target USB VendorID / ProductID
+    std::string resolvedPort_;              // last successfully-opened port (for logs)
+    std::string lastOpenError_;             // OS error from the last failed openDevice
+    std::string lastOpenErrorPort_;         // the port that failed to open
     size_t connectTries_ = 5;               // extra attempts beyond the first
     unsigned int connectTimeoutMs_ = 200;   // backoff between attempts
+
+    enum class OpenResult { Opened, NotFound, OpenFailed };
+
+    // "vvvv:pppp" lowercase-hex form of the target VID/PID, for logging.
+    std::string usbIdString_() const {
+        char b[16];
+        std::snprintf(b, sizeof(b), "%04x:%04x", vid_, pid_);
+        return b;
+    }
 
     // Read-loop pacing. The loop reads only bytes that are already buffered, so
     // this poll interval — not a fixed read size — bounds the added latency.
@@ -86,23 +103,41 @@ protected:
 #endif
     }
 
+    // Resolve the port by USB VID/PID (descriptor read only — never opens other
+    // devices) and open it. NotFound means 0 or >1 devices matched (fail-safe:
+    // abstain rather than guess).
+    OpenResult tryOpen_() {
+        auto port = mdx::usb::findPortByUsbId(vid_, pid_);
+        if (!port) {
+            return OpenResult::NotFound;
+        }
+        if (serial_.openDevice(port->c_str(), kBaudRate_) == 1) {
+            resolvedPort_ = *port;
+            return OpenResult::Opened;
+        }
+        // Capture before anything else touches errno / GetLastError.
+        lastOpenError_ = lastOsError_();
+        lastOpenErrorPort_ = *port;
+        return OpenResult::OpenFailed;
+    }
+
     // Bounded retry loop used at startup, mirroring Viper's connect loop:
     // connectTries_ extra attempts beyond the first, connectTimeoutMs_ apart.
-    // Logs the serialib return code and OS error on each failure for diagnosis.
+    // Logs the reason (device not found vs. open failure) each attempt.
     bool connect_() {
         for (size_t attempt = 0; attempt <= connectTries_; ++attempt) {
-            char rc = serial_.openDevice(port_.c_str(), kBaudRate_);
-            if (rc == 1) {
+            OpenResult r = tryOpen_();
+            if (r == OpenResult::Opened) {
                 return true;
             }
-            // Capture before anything else touches errno / GetLastError.
-            const std::string osErr = lastOsError_();
-
+            const std::string why =
+                (r == OpenResult::NotFound)
+                    ? ("no unique USB " + usbIdString_() + " device found")
+                    : ("openDevice(" + lastOpenErrorPort_ + ") failed, OS error "
+                       + lastOpenError_);
             fgInterface_->logWarning(
-                "Force sensor openDevice(" + port_ + ") failed on attempt "
-                + std::to_string(attempt + 1) + "/" + std::to_string(connectTries_ + 1)
-                + " (serialib code " + std::to_string(static_cast<int>(rc))
-                + ", OS error " + osErr + ")");
+                "Force sensor connect attempt " + std::to_string(attempt + 1) + "/"
+                + std::to_string(connectTries_ + 1) + ": " + why);
 
             if (attempt < connectTries_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(connectTimeoutMs_));
@@ -152,11 +187,15 @@ protected:
             // backing off between tries, until connected or shut down. Failed
             // attempts are not logged individually here to avoid log spam.
             if (!serial_.isDeviceOpen()) {
-                if (serial_.openDevice(port_.c_str(), kBaudRate_) != 1) {
+                // Re-detect the port each attempt (it can renumber across replug).
+                // Silent on failure here to avoid log spam while the device is
+                // absent; startup diagnostics come from connect_().
+                if (tryOpen_() != OpenResult::Opened) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(connectTimeoutMs_));
                     continue;
                 }
-                fgInterface_->logInfo("Force sensor serial port connected: " + port_);
+                fgInterface_->logInfo("Force sensor connected: " + resolvedPort_
+                                      + " (USB " + usbIdString_() + ")");
                 serial_.flushReceiver();
                 // A fresh stream starts at an arbitrary byte offset: drop whatever
                 // the previous connection left buffered and re-arm the framing so
@@ -311,25 +350,29 @@ public:
     }
 
 
-    void init(std::string &&port = "/dev/cu.usbmodem2101",
+    void init(std::uint16_t vid, std::uint16_t pid,
               float minimum_contact_force = 0.3,
               size_t connectTries = 5,
               unsigned int connectTimeoutMs = 200) {
-        port_ = std::move(port);
+        vid_ = vid;
+        pid_ = pid;
         _minimum_contact_force = minimum_contact_force;
         connectTries_ = connectTries;
         connectTimeoutMs_ = connectTimeoutMs;
 
         if (connect_()) {
-            fgInterface_->logInfo("Force sensor serial port opened: " + port_);
+            fgInterface_->logInfo("Force sensor connected: " + resolvedPort_
+                                  + " (USB " + usbIdString_() + ")");
         } else {
             fgInterface_->logError(
-                "Force sensor serial port failed to open after retries (" + port_
-                + "); continuing without force data and retrying in the background");
+                "Force sensor USB device " + usbIdString_()
+                + " not connected after retries; continuing without force data and "
+                  "retrying in the background");
         }
 
-        // Start the reader regardless of the initial result: if the open failed
-        // it keeps retrying, so the application runs degraded rather than dead.
+        // Start the reader regardless of the initial result: if it did not
+        // connect it keeps re-detecting, so the application runs degraded rather
+        // than dead.
         startForceUpdate();
     }
 
@@ -352,7 +395,11 @@ public:
 
     void close() {
         closed = true;
-        continuousPublishThread_.join();
+        // Guard: init() may not have been called (e.g. no valid pressure_usb_id),
+        // in which case the reader thread was never started.
+        if (continuousPublishThread_.joinable()) {
+            continuousPublishThread_.join();
+        }
         serial_.closeDevice();
     }
 
