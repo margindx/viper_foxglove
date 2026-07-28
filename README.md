@@ -10,9 +10,10 @@ This code contains two separate programs:
 The C++ program is set up to try to connect to a Polhemus Viper module. In the `main` function, the force sensing
 functionality is currently commented out since it relies on the presence of a force module.
 
-For the probe positioning functionality, a rigid transformation is currently hardcoded to average 3 distinct EM sensors
-and to translate the resulting position along the axial direction to get the probe tip position. This is based on the
-legacy probe design, and will require a small update once the EM sensor module for the mid-size probe is designed.
+For the probe positioning functionality, the connected EM sensors are fused into a single pose, which is then mapped onto
+the probe tip by a rigid transform. Both the number of sensors and the transform come from the config file rather than
+being hardcoded, so the same binary supports the legacy 3-sensor probe and a single-sensor probe — see
+[Probe profiles](#probe-profiles).
 
 The C++ program has the following dependencies:
 
@@ -58,20 +59,21 @@ runtime settings it is using, so you can confirm the values took effect.
 ### What happens if no config file is found
 
 The program does **not** search for or resolve any alternate config file. It checks exactly one path — either
-`viper-config.json` in the working directory, or the path you passed as an argument. If that file does not
-exist, it prints `No config file found. using default values` and runs entirely on the built-in defaults
-compiled into the program.
+`viper-config.json` in the working directory, or the path you passed as an argument.
 
-Parsing is also field-by-field: any key omitted from the config file falls back to its built-in default, so a
-partial config file only overrides the fields it specifies.
+**A config file is required.** If that file does not exist, cannot be parsed, or does not contain a valid
+`probe_profiles` block, the program prints an error and exits with status 1 rather than starting. This is
+deliberate: `probe_profiles` carries the probe tip offset, and running with the wrong offset misplaces the
+tip by centimetres without any visible symptom, so there is no default to fall back on.
+
+Every other key is still parsed field-by-field: any key apart from `probe_profiles` that is omitted falls back
+to its built-in default.
 
 ### Available settings
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `offset_x` | float | `0.150` | Along-probe offset from sensor to tip (meters). |
-| `offset_y` | float | `0.0` | Horizontal offset from sensor to probe center (keep at 0). |
-| `offset_z` | float | `0.0` | Horizontal offset from sensor to probe center (keep at 0). |
+| `probe_profiles` | array | *(none — required)* | One entry per probe design, keyed by how many EM sensors it presents. See [Probe profiles](#probe-profiles). |
 | `minimum_contact_force` | float | `0.35` | Force threshold above which contact is registered (only used when `use_hardware_contact` is `false`). |
 | `pressure_device_port` | string | `/dev/ttyACM0` | USB device port for the pressure/force sensor. |
 | `use_hardware_contact` | bool | `true` | If `true`, use the 0/1 contact flag reported by the device; if `false`, derive contact from the force thresholds and `contact_require_fN` flags. |
@@ -80,8 +82,68 @@ partial config file only overrides the fields it specifies.
 | `contact_require_f3` | bool | `true` | Same as above, for force sensor 3. |
 | `contact_require_f4` | bool | `true` | Same as above, for force sensor 4. |
 
-> Note: the built-in default for `offset_x` is `0.150`, while the sample `viper-config.json` ships with
-> `0.157`.
+### Probe profiles
+
+The probe tip offset depends on which probe is fitted, and each probe design presents a different number of EM
+sensors to the Viper SEU. `probe_profiles` maps one to the other:
+
+```json
+"probe_profiles": [
+    {
+        "sensor_count": 3,
+        "label": "legacy triple",
+        "tip_offset_m": [0.157, 0.0, 0.0],
+        "tip_rotation_zyx_deg": [0.0, 0.0, 0.0]
+    },
+    {
+        "sensor_count": 1,
+        "label": "mid-size single",
+        "tip_offset_m": [0.150, 0.0, 0.0]
+    }
+]
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `sensor_count` | int ≥ 1 | yes | Number of connected EM sensors this profile applies to. Each count may appear at most once. |
+| `tip_offset_m` | `[x, y, z]` | yes | Offset in **metres** from the fused sensor origin to the probe tip, in the sensor frame. `x` is the along-probe direction; `y`/`z` are offsets to the probe centre and are normally `0`. |
+| `tip_rotation_zyx_deg` | `[az, el, roll]` | no | Rotation from the sensor frame to the tip frame, in degrees, using the Viper's own Z-Y-X (azimuth / elevation / roll) convention. Omit for identity. |
+| `label` | string | no | Name echoed to the log when the profile is selected. |
+
+#### Switching between probes
+
+**Switching probes means changing what is plugged in. Nothing in the config needs editing to switch.**
+
+On startup the program reads the sensor count from the first Viper frame that reports any sensors, selects the
+matching profile, and logs which one it picked:
+
+```
+Probe profile selected: 3 sensors ("legacy triple"), tip offset [0.157, 0, 0] m
+```
+
+The profile is then **latched** for the rest of the run. Keep both profiles in your config and the same file
+works for either probe.
+
+Two failure cases are reported rather than guessed at:
+
+- **No profile matches the connected sensor count.** No tip pose is published at all, and an error naming the
+  configured counts is logged. The raw per-sensor poses on `/viper/poses` keep flowing.
+- **The sensor count changes mid-run** (typically an intermittent connector). The originally latched profile
+  stays in effect — the tip offset does not shift under the operator mid-experiment — and a rate-limited error
+  is logged saying the published tip pose is no longer trustworthy. Check the connections and restart.
+
+#### How the sensors are fused
+
+Positions are averaged. Orientations are averaged componentwise **after** flipping each quaternion into the
+same hemisphere as the first sensor's: `q` and `−q` are the same rotation, so summing the raw components can
+cancel to near-zero and yield an arbitrary orientation after normalisation. The tip transform is then applied
+to the fused pose, and the published orientation is the tip frame's.
+
+With `sensor_count: 1` the fusion is a pass-through: the published pose is exactly the sensor's own pose with
+the tip transform applied, with no averaging arithmetic involved.
+
+A frame whose readings are non-finite, or whose quaternions are not unit norm, is dropped without publishing a
+tip pose, and a rate-limited warning is logged.
 
 ### Documenting fields inline
 
@@ -160,6 +222,20 @@ Mode LastWriteTime Length Name
 2. `cd` to your `viper_foxglove` directory (e.g., `cd  C:\Users\dx\git\viper_foxglove` )
 3. run `cmake --preset=default`  (this will fetch a bunch of dependencies )
 4. build a release: `cmake --build build --config Release`
+
+#### Running the tests
+
+The probe-profile fusion maths and config parsing are covered by unit tests that need no hardware. They are
+built alongside the main target and run with:
+
+```
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The test target depends only on Catch2 (fetched by vcpkg via `vcpkg.json`) and the vendored headers under
+`dep/`, so it builds without Open3D, the Foxglove SDK or libusb. If Catch2 is not present, CMake prints
+`Catch2 not found - skipping the viper_tests target` and the main build proceeds; CI runs `ctest` with
+`--no-tests=error` so a missing Catch2 there fails the run instead of silently skipping.
 
 ### Running
 

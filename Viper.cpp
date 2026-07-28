@@ -294,51 +294,12 @@ void Viper::pnoToPosesInFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, flatbuff
     builder.Finish(posesInFrame);
 }
 
+// No-op, kept only because pnoToPosesInFrame (itself unused) calls it. The
+// sensor-to-tip transform this once sketched now lives in
+// mdx::applyTipTransform, driven by the probe profile, and is applied to the
+// fused pose rather than to each sensor's frame data.
 SENFRAMEDATA *Viper::pnoTransformInBodyFrame(SENFRAMEDATA *pfd) {
-//    Eigen::Quaternion<float> quat{
-//        pfd->pno.ori[0],
-//        pfd->pno.ori[1],
-//        pfd->pno.ori[2],
-//        pfd->pno.ori[3],
-//    };
-//
-//    Eigen::Vector3f pos{
-//        pfd->pno.pos[0]/100.f,
-//        pfd->pno.pos[1]/100.f,
-//        pfd->pno.pos[2]/100.f
-//    };
-
-//    Eigen::Quaternion<float> offset{
-//        0,
-//        offset_.x(),
-//        offset_.y(),
-//        offset_.z()
-//    };
-//
-//    auto rotatedOffset = quat * offset * quat.inverse();
-//
-//    pfd->pno.pos[0] = pos.x() + rotatedOffset.x();
-//    pfd->pno.pos[1] = pos.y() + rotatedOffset.y();
-//    pfd->pno.pos[2] = pos.z() + rotatedOffset.z();
-    pfd->pno.pos[0];
-    pfd->pno.pos[1];
-    pfd->pno.pos[2];
-
     return pfd;
-}
-
-void Viper::setOffset(Eigen::Vector3f &offset) {
-    offset_ = offset;
-}
-
-void Viper::setOffset(float x, float y, float z) {
-    offset_.x() = x;
-    offset_.y() = y;
-    offset_.z() = z;
-}
-
-const Eigen::Vector3f &Viper::getOffset() const {
-    return offset_;
 }
 
 void Viper::pnoToPoseInFrame(SENFRAMEDATA *pfd) {
@@ -372,9 +333,47 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
     // foxglove timestamp
     auto time = foxglove::schemas::Timestamp{static_cast<uint32_t>(sec), static_cast<uint32_t>(nsec)};
 
-    // Apply offset to all sensors and transform to meters
-    for (int i=0; i < nSensors; i++) {
-        pnoOffset(pfd_all + i);
+    // Pick the probe profile from the number of sensors the SEU is reporting,
+    // and latch it. Which probe is fitted is decided by what is plugged in, so
+    // the sensor count is the only thing that identifies it.
+    if (activeProfile_ == nullptr) {
+        if (nSensors == 0)
+            return;     // nothing to identify the probe by yet
+
+        activeProfile_ = mdx::selectProfile(profiles_, static_cast<int>(nSensors));
+
+        if (activeProfile_ == nullptr) {
+            // Publishing a tip pose here would mean guessing an offset, which
+            // misplaces the tip silently. Refuse, and say why. The raw
+            // per-sensor poses are still published below: they need no profile,
+            // and they are what you need to diagnose this.
+            if ((++noProfileFrames_ % 100) == 1) {
+                std::stringstream ss;
+                ss << "No probe profile configured for " << nSensors << " sensor(s); "
+                   << "not publishing a tip pose. Configured profiles:";
+                for (const auto &profile : profiles_)
+                    ss << " " << profile.sensorCount;
+                ss << ". Add a matching entry to \"probe_profiles\" in the config file.";
+                fgInterface_->logError(ss.str());
+            }
+        } else {
+            latchedSensorCount_ = static_cast<int>(nSensors);
+            fgInterface_->logInfo("Probe profile selected: " + mdx::describeProfile(*activeProfile_));
+            std::cout << "Probe profile selected: " << mdx::describeProfile(*activeProfile_) << std::endl;
+        }
+    } else if (static_cast<int>(nSensors) != latchedSensorCount_) {
+        // The profile stays latched: the tip offset must not change under the
+        // operator mid-run. The tip pose is wrong while this persists, so the
+        // message has to be impossible to miss in the log and the MCAP.
+        if ((++countMismatchFrames_ % 100) == 1) {
+            std::stringstream ss;
+            ss << "Sensor count changed from " << latchedSensorCount_ << " to " << nSensors
+               << " after the probe profile was latched (" << countMismatchFrames_
+               << " frame(s) so far). Still applying the " << latchedSensorCount_
+               << "-sensor tip offset, so the published tip pose is NOT trustworthy. "
+               << "Check the EM sensor connections and restart.";
+            fgInterface_->logError(ss.str());
+        }
     }
 
     // Compute distances; update positions and velocities
@@ -446,10 +445,28 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
 
 
     std::vector<foxglove::schemas::Pose> poses;
+    std::vector<mdx::Pose> sensorPoses;
+    sensorPoses.reserve(nSensors);
 
     // gather all poses
     for (int i=0; i < nSensors; i++) {
         SENFRAMEDATA *pfd = pfd_all + i;
+
+        // Same values as the Foxglove pose below, kept in Eigen form for the
+        // fusion maths. Quaternion order from the device is (w, x, y, z).
+        mdx::Pose sensorPose;
+        sensorPose.position = Eigen::Vector3d{
+            pfd->pno.pos[0],
+            pfd->pno.pos[1],
+            pfd->pno.pos[2]
+        };
+        sensorPose.orientation = Eigen::Quaterniond{
+            pfd->pno.ori[0],
+            pfd->pno.ori[1],
+            pfd->pno.ori[2],
+            pfd->pno.ori[3]
+        };
+        sensorPoses.push_back(sensorPose);
 
         // foxglove position
         auto pos = foxglove::schemas::Vector3{
@@ -506,41 +523,37 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
         poses.push_back(pose);
     }
 
-    foxglove::schemas::Pose avgPose;
-    double xAvg{0}, yAvg{0}, zAvg{0}, qxAvg{0}, qyAvg{0}, qzAvg{0}, qwAvg{0};
+    // Fuse the sensors into one pose, then map that onto the probe tip. With a
+    // single sensor the fusion is a pass-through, so the tip pose is that
+    // sensor's own pose with the profile's transform applied.
+    // Without a profile there is no trustworthy offset, so no tip pose is
+    // published. That case was already reported above; the raw per-sensor poses
+    // still go out below either way.
+    if (activeProfile_ != nullptr) {
+        const std::optional<mdx::Pose> fused = mdx::fusePoses(sensorPoses);
 
-    size_t nPoses = poses.size();
-    for (auto &pose : poses) {
-        xAvg += pose.position.value().x / nPoses;
-        yAvg += pose.position.value().y / nPoses;
-        zAvg += pose.position.value().z / nPoses;
-        qxAvg += pose.orientation.value().x / nPoses;
-        qyAvg += pose.orientation.value().y / nPoses;
-        qzAvg += pose.orientation.value().z / nPoses;
-        qwAvg += pose.orientation.value().w / nPoses;
+        if (fused.has_value()) {
+            const auto tipPose = toFoxglovePose(mdx::applyTipTransform(fused.value(), activeProfile_->tip));
+            auto swingTwist = computeSwingTwist(tipPose);
+
+            auto poseInFrame = foxglove::schemas::PoseInFrame{
+                    time,
+                    "viper",
+                    tipPose
+            };
+
+            fgInterface_->publishPose(poseInFrame);
+            fgInterface_->logSwingTwist(swingTwist);
+        } else if ((++unusableFrames_ % 100) == 1) {
+            // A non-finite or non-unit-norm reading. The raw per-sensor poses
+            // are still published below so the bad frames stay visible in the
+            // MCAP for diagnosis.
+            std::stringstream ss;
+            ss << "Dropped a PNO frame with unusable sensor data (" << unusableFrames_
+               << " frame(s) so far): no tip pose published for it";
+            fgInterface_->logWarning(ss.str());
+        }
     }
-
-    // Normalize quaternion
-    auto qMag = sqrt(qxAvg*qxAvg + qyAvg*qyAvg + qzAvg*qzAvg + qwAvg*qwAvg);
-    qxAvg /= qMag;
-    qyAvg /= qMag;
-    qzAvg /= qMag;
-    qwAvg /= qMag;
-
-    avgPose.position.emplace(foxglove::schemas::Vector3{xAvg, yAvg, zAvg});
-    avgPose.orientation.emplace(foxglove::schemas::Quaternion{qxAvg, qyAvg, qzAvg, qwAvg});
-    // Apply offset
-    transformPose(avgPose);
-    auto swingTwist = computeSwingTwist(avgPose);
-
-    auto poseInFrame = foxglove::schemas::PoseInFrame{
-            time,
-            "viper",
-            avgPose
-    };
-
-    fgInterface_->publishPose(poseInFrame);
-    fgInterface_->logSwingTwist(swingTwist);
 
     auto posesInFrame = foxglove::schemas::PosesInFrame{
         time,

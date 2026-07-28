@@ -1,5 +1,6 @@
 #include <iostream>
 #include "viper_ui.h"
+#include "ProbeProfile.hpp"
 #include "Viper.hpp"
 #include "SerialForce.hpp"
 #include "FoxgloveInterface.hpp"
@@ -18,7 +19,7 @@ using json = nlohmann::json;
 
 using namespace std;
 
-void launchFoxglove(std::string config_filename) {
+int launchFoxglove(std::string config_filename) {
     foxglove::setLogLevel(foxglove::LogLevel::Debug);
 
     static std::function<void()> sigint_handler;
@@ -36,9 +37,7 @@ void launchFoxglove(std::string config_filename) {
     });
 
     // ---- Parsing runtime config options ---- //
-    float offset_x = 0.150;
-    float offset_y = 0.0;
-    float offset_z = 0.0;
+    std::vector<mdx::ProbeProfile> probe_profiles;
     float min_contact_force = 0.35;
     bool use_hardware_contact = true;
     bool contact_require_f1 = true;
@@ -47,23 +46,43 @@ void launchFoxglove(std::string config_filename) {
     bool contact_require_f4 = true;
     std::string &&pressure_port = "/dev/ttyACM0";
 
-    if (std::filesystem::exists(config_filename))
+    // The probe profiles are required: the tip offset depends on which probe is
+    // fitted, and there is no safe default to fall back on. Running without
+    // them would misplace the tip silently, so a missing or malformed config is
+    // fatal rather than defaulted.
+    if (!std::filesystem::exists(config_filename))
+    {
+        cerr << "Config file not found: " << config_filename << "\n"
+             << "A config file is now required because it carries the \"probe_profiles\" "
+                "block that maps the connected EM sensor count to a probe tip offset.\n"
+             << "See the \"Probe profiles\" section of README.md.\n";
+        return 1;
+    }
+
     {
         cout << "Parsing config file: " << config_filename << endl;
         std::ifstream f(config_filename);
-        json settings = json::parse(f);
-        if (settings.contains("offset_x"))
+        json settings;
+        try
         {
-            offset_x = settings["offset_x"];
+            settings = json::parse(f);
         }
-        if (settings.contains("offset_y"))
+        catch (const std::exception &e)
         {
-            offset_y = settings["offset_y"];
+            cerr << "Could not parse config file " << config_filename << ": " << e.what() << "\n";
+            return 1;
         }
-        if (settings.contains("offset_z"))
+
+        try
         {
-            offset_z = settings["offset_z"];
+            probe_profiles = mdx::parseProbeProfiles(settings);
         }
+        catch (const std::exception &e)
+        {
+            cerr << "Invalid probe configuration in " << config_filename << ": " << e.what() << "\n";
+            return 1;
+        }
+
         if (settings.contains("minimum_contact_force"))
         {
             min_contact_force = settings["minimum_contact_force"];            
@@ -95,15 +114,13 @@ void launchFoxglove(std::string config_filename) {
 
         cout << "    Done parsing.\n";
     }
-    else
-    {
-        cout << "No config file found. using default values\n";
-    }
 
     cout << "\nRuntime settings:\n";
-    cout << "    offset_x:" << offset_x << endl;
-    cout << "    offset_y:" << offset_y << endl;
-    cout << "    offset_z:" << offset_z << endl;
+    cout << "    probe_profiles:" << endl;
+    for (const auto &profile : probe_profiles)
+    {
+        cout << "        " << mdx::describeProfile(profile) << endl;
+    }
     cout << "    pressure_device_port:" << pressure_port << endl;
     cout << "    minimum_contact_force:" << min_contact_force << endl;
     cout << "    use_hardware_contact:" << use_hardware_contact << endl;
@@ -119,7 +136,9 @@ void launchFoxglove(std::string config_filename) {
     auto fgInterface = FoxgloveInterface{"viper.mcap"};
     std::this_thread::sleep_for(1000ms);
 
-    Viper viper{&fgInterface, 10, 100};
+    // The profiles go in through the constructor: it starts the read threads,
+    // so anything set afterwards would miss the first frames.
+    Viper viper{&fgInterface, probe_profiles, 10, 100};
 
     std::atomic_bool done = false;
     sigint_handler = [&]
@@ -127,8 +146,6 @@ void launchFoxglove(std::string config_filename) {
         done = true;
     };
 
-    // initialize viper with all settings
-    viper.setOffset(offset_x, offset_y, offset_z); // slim: (0.150, 0, 0); YOP: (0.157, 0, 0)
     viper.initTransforms();
 
     SerialForce serialForce{fgInterface};    
@@ -151,6 +168,8 @@ void launchFoxglove(std::string config_filename) {
         counter++;
         std::this_thread::sleep_for(33ms);
     }
+
+    return 0;
 }
 
 
@@ -160,7 +179,6 @@ int main(int argc, char** argv) {
     if (argc > 1){
         config_filename = argv[1];
     }
-    launchFoxglove(config_filename);
 
-    return 0;
+    return launchFoxglove(config_filename);
 }

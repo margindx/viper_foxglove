@@ -13,6 +13,7 @@
 #include "viper_queue.h"
 #include "ViperInterface.h"
 #include "SensorData.hpp"
+#include "ProbeProfile.hpp"
 #include "FoxgloveInterface.hpp"
 
 #include "schema/foxglove/Time_generated.h"
@@ -40,7 +41,19 @@ protected:
 
     static uint32_t calculateCrc16(uint8_t *b, uint32_t len);
 
-    Eigen::Vector3f offset_;
+    /// Probe profiles from the config, one per supported sensor count.
+    std::vector<mdx::ProbeProfile> profiles_;
+    /// The profile chosen from the first frame that carried sensors, and the
+    /// count it was chosen for. Latched: the tip offset must not change under
+    /// the operator mid-run just because a connector went intermittent.
+    /// Aliases into profiles_, which is never mutated after construction.
+    const mdx::ProbeProfile *activeProfile_ = nullptr;
+    int latchedSensorCount_ = -1;
+
+    /// Rate-limiting counters for the repeating fault paths.
+    uint64_t noProfileFrames_ = 0;
+    uint64_t countMismatchFrames_ = 0;
+    uint64_t unusableFrames_ = 0;
 
     flatbuffers::FlatBufferBuilder fbBuilder_;
     FoxgloveInterface *fgInterface_;
@@ -62,12 +75,20 @@ protected:
     std::vector<float> distanceTraveled_;
     std::optional<std::chrono::time_point<std::chrono::system_clock>> lastSampleTime_;
 public:
-    explicit Viper(FoxgloveInterface* fgInterface=nullptr, size_t reconnectTries=0, size_t timeOutMs=5) :
-        fbBuilder_(1024), offset_(Eigen::Vector3f::Zero()), fgInterface_(fgInterface), viperUsb{} {
+    /// The profiles must be supplied here rather than through a setter: the
+    /// constructor starts the USB read and continuous-publish threads, so a
+    /// profile set afterwards would arrive too late for the first frames.
+    explicit Viper(FoxgloveInterface* fgInterface, std::vector<mdx::ProbeProfile> profiles,
+                   size_t reconnectTries=0, size_t timeOutMs=5) :
+        fbBuilder_(1024), profiles_(std::move(profiles)), fgInterface_(fgInterface), viperUsb{} {
         if (fgInterface == nullptr) {
             throw std::runtime_error("FoxgloveInterface delivered as nullptr");
         } else {
             fgInterface_ = fgInterface;
+        }
+
+        if (profiles_.empty()) {
+            throw std::runtime_error("Viper constructed with no probe profiles");
         }
 
         bool connected = false;
@@ -161,12 +182,6 @@ public:
         posesInFrame_.frame_id = "viper";
     }
 
-    void setOffset(Eigen::Vector3f &offset);
-
-    void setOffset(float x=0, float y=0, float z=0);
-
-    const Eigen::Vector3f& getOffset() const;
-
     void connect();
 
     void readUsb(viper_usb *pvpr);
@@ -202,32 +217,23 @@ public:
 
     SENFRAMEDATA *pnoOffset(SENFRAMEDATA *pfd);
 
-    void transformPose(foxglove::schemas::Pose &pose) {
-        Eigen::Quaternion<double> quat{
-            pose.orientation.value().w,
-            pose.orientation.value().x,
-            pose.orientation.value().y,
-            pose.orientation.value().z
-        };
+    /// Convert an mdx::Pose into the Foxglove schema type. Note that
+    /// foxglove::schemas::Quaternion is ordered (x, y, z, w).
+    static foxglove::schemas::Pose toFoxglovePose(const mdx::Pose &pose) {
+        foxglove::schemas::Pose out;
+        out.position.emplace(foxglove::schemas::Vector3{
+            pose.position.x(),
+            pose.position.y(),
+            pose.position.z()
+        });
+        out.orientation.emplace(foxglove::schemas::Quaternion{
+            pose.orientation.x(),
+            pose.orientation.y(),
+            pose.orientation.z(),
+            pose.orientation.w()
+        });
 
-        Eigen::Vector3d pos{
-            pose.position.value().x,
-            pose.position.value().y,
-            pose.position.value().z
-        };
-
-        Eigen::Quaternion<double> offset{
-            0,
-            offset_.x(),
-            offset_.y(),
-            offset_.z()
-        };
-
-        auto rotatedOffset = quat * offset * quat.inverse();
-
-        pose.position.value().x = pos.x() + rotatedOffset.x();
-        pose.position.value().y = pos.y() + rotatedOffset.y();
-        pose.position.value().z = pos.z() + rotatedOffset.z();
+        return out;
     }
 
     mdx::SwingTwist computeSwingTwist(const foxglove::schemas::Pose &pose) const {
