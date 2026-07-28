@@ -1,6 +1,7 @@
 {
   "dependencies": [
     "protobuf",
-    "libusb"
+    "libusb",
+    "catch2"
   ]
 }
