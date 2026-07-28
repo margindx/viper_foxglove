@@ -475,8 +475,8 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
             pfd->pno.pos[2]
         };
 
-        // Log point to line for sensor 0
-        if (i == 0) {
+        // Log point to line for sensor 0 (skip when downstream generates geometry)
+        if (i == 0 && fgInterface_->generateGeometry()) {
             auto point = foxglove::schemas::Point3{
                 pos.x,
                 pos.y,
