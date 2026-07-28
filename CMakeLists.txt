@@ -4,7 +4,33 @@ project(viper LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-find_package(Open3D REQUIRED)
+# Open3D is optional. It is only needed for the mesh reconstruction endpoints.
+# MDX_WITH_OPEN3D controls whether it is used:
+#   AUTO (default) - use Open3D if found, otherwise build without it
+#   ON             - require Open3D (configure fails if it is missing)
+#   OFF            - never use Open3D, even if it is installed
+# When Open3D is not used, the program still compiles and runs; the mesh
+# reconstruction endpoints are compiled out and degrade gracefully.
+set(MDX_WITH_OPEN3D "AUTO" CACHE STRING "Open3D mesh reconstruction support: AUTO, ON, or OFF")
+set_property(CACHE MDX_WITH_OPEN3D PROPERTY STRINGS AUTO ON OFF)
+
+set(OPEN3D_ENABLED FALSE)
+if(MDX_WITH_OPEN3D STREQUAL "OFF")
+    message(STATUS "Open3D disabled (MDX_WITH_OPEN3D=OFF): mesh reconstruction endpoints DISABLED")
+elseif(MDX_WITH_OPEN3D STREQUAL "ON")
+    find_package(Open3D REQUIRED)
+    set(OPEN3D_ENABLED TRUE)
+    message(STATUS "Open3D found (required): mesh reconstruction endpoints ENABLED")
+else()
+    find_package(Open3D QUIET)
+    if(Open3D_FOUND)
+        set(OPEN3D_ENABLED TRUE)
+        message(STATUS "Open3D found: mesh reconstruction endpoints ENABLED")
+    else()
+        message(STATUS "Open3D not found: mesh reconstruction endpoints DISABLED")
+    endif()
+endif()
+
 find_package(Protobuf REQUIRED CONFIG)
 
 # Fetch Foxglove SDK - automatically select based on OS and architecture
@@ -181,6 +207,10 @@ else()
     target_link_libraries(viper PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
 endif()
 
-target_link_libraries(viper PRIVATE Open3D::Open3D)
+# Only link Open3D and enable the mesh reconstruction code paths when available.
+if(OPEN3D_ENABLED)
+    target_link_libraries(viper PRIVATE Open3D::Open3D)
+    target_compile_definitions(viper PRIVATE MDX_WITH_OPEN3D)
+endif()
 
 target_link_libraries(viper PRIVATE protobuf::libprotobuf)

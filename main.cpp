@@ -15,6 +15,7 @@ using json = nlohmann::json;
 #include <csignal>
 #include <functional>
 #include <filesystem>
+#include <fstream>
 
 using namespace std;
 
@@ -40,6 +41,7 @@ void launchFoxglove(std::string config_filename) {
     float offset_y = 0.0;
     float offset_z = 0.0;
     float min_contact_force = 0.35;
+    bool use_hardware_contact = true;
     bool contact_require_f1 = true;
     bool contact_require_f2 = true;
     bool contact_require_f3 = true;
@@ -66,11 +68,15 @@ void launchFoxglove(std::string config_filename) {
         }
         if (settings.contains("minimum_contact_force"))
         {
-            min_contact_force = settings["minimum_contact_force"];            
+            min_contact_force = settings["minimum_contact_force"];
         }
         if (settings.contains("pressure_device_port"))
         {
             pressure_port = settings["pressure_device_port"];
+        }
+        if (settings.contains("use_hardware_contact"))
+        {
+            use_hardware_contact = settings["use_hardware_contact"];
         }
         if (settings.contains("contact_require_f1"))
         {
@@ -106,6 +112,7 @@ void launchFoxglove(std::string config_filename) {
     cout << "    offset_z:" << offset_z << endl;
     cout << "    pressure_device_port:" << pressure_port << endl;
     cout << "    minimum_contact_force:" << min_contact_force << endl;
+    cout << "    use_hardware_contact:" << use_hardware_contact << endl;
     cout << "    contact_require_f1:" << contact_require_f1 << endl;
     cout << "    contact_require_f2:" << contact_require_f2 << endl;
     cout << "    contact_require_f3:" << contact_require_f3 << endl;
@@ -134,8 +141,9 @@ void launchFoxglove(std::string config_filename) {
     viper.setOffset(offset_x, offset_y, offset_z); // slim: (0.150, 0, 0); YOP: (0.157, 0, 0)
     viper.initTransforms();
 
-    SerialForce serialForce{fgInterface};    
+    SerialForce serialForce{fgInterface};
     serialForce.init(std::move(pressure_port), min_contact_force);
+    serialForce.setUseHardwareContact(use_hardware_contact);
     serialForce.setRequireSensor(contact_require_f1, contact_require_f2, contact_require_f3, contact_require_f4);
     long long counter = 1;
 

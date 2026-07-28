@@ -40,10 +40,20 @@
 #include "DynamicProtobufDecoder.hpp"
 #include "MeshReconstruction.hpp"
 
+// Include what this header actually uses. Several of these previously arrived
+// transitively via Open3D's headers (through MeshReconstruction.hpp), which are
+// absent in a build without Open3D.
 #include <thread>
+#include <mutex>
 #include <optional>
 #include <cmath>
 #include <iomanip>
+#include <memory>
+#include <sstream>
+#include <functional>
+#include <vector>
+#include <string>
+#include <cstddef>
 
 using namespace std::literals::chrono_literals;
 
@@ -247,7 +257,9 @@ class FoxgloveInterface {
     bool generateGeometry_ = true;
 
     std::mutex meshMtx_;
+#ifdef MDX_WITH_OPEN3D
     std::shared_ptr<open3d::geometry::TriangleMesh> mesh_;
+#endif
 
     std::mutex modelMtx_;
     std::shared_ptr<std::vector<std::byte>> model_;
@@ -561,8 +573,28 @@ public:
         hhPointsContactChannel_.value().log(pcContact);
     }
 
+#ifndef MDX_WITH_OPEN3D
+    // Emits a single warning the first time an Open3D-only endpoint is invoked
+    // in a build without Open3D support.
+    void warnOpen3DUnavailable(const char *endpoint) {
+        static std::once_flag warned;
+        std::call_once(warned, [&] {
+            logWarning(std::string("Open3D support not compiled in; ") + endpoint +
+                       "() is a no-op. Rebuild with Open3D to enable mesh reconstruction.");
+        });
+    }
+#endif
+
+    // Mesh reconstruction is gated twice, independently:
+    //  - generateGeometry_ (runtime): the operator opted out because a
+    //    downstream component generates geometry. A silent no-op.
+    //  - MDX_WITH_OPEN3D (compile time): mesh reconstruction requires Open3D.
+    //    A no-op that warns once, since geometry *was* wanted here.
+    // The runtime check comes first so opting out never produces an Open3D
+    // warning about work that was not asked for.
     void publishMesh() {
         if (!generateGeometry_) return;
+#ifdef MDX_WITH_OPEN3D
 //        mdx::Point6dView pointView{pointsContact_};
         mdx::Point6dView pointView{pointsAll_};
         auto mesh = mdx::geometry::CreateMesh(pointView.points, pointView.normals);
@@ -588,11 +620,14 @@ public:
         modelGltf.data = *meshSerializedGltf;
         modelGltf.media_type = "model/gltf+json";
         modelGltf.pose.emplace();
+#else
+        warnOpen3DUnavailable("publishMesh");
+#endif
     }
 
     void publishMeshModel() {
         if (!generateGeometry_) return;
-
+#ifdef MDX_WITH_OPEN3D
         foxglove::schemas::ModelPrimitive model;
         {
             std::lock_guard<std::mutex> guard{modelMtx_};
@@ -609,6 +644,9 @@ public:
         sceneUpdate.entities.push_back(entity);
 
         sceneChannel_.value().log(sceneUpdate);
+#else
+        warnOpen3DUnavailable("publishMeshModel");
+#endif
     }
 
     void logRawForce(mdx::RawForce &rawForce) {
