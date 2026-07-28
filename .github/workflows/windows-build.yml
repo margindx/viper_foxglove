@@ -1,0 +1,67 @@
+name: Windows build
+
+# Verifies viper_foxglove compiles on Windows, mirroring the manual steps in
+# README.md ("Windows installation and building notes").
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE.md"
+      - ".gitignore"
+      - ".idea/**"
+      - "pointcloud.ipynb"
+  workflow_dispatch:
+
+env:
+  # Where vcpkg stores built binary packages. Cached across runs so protobuf
+  # and its abseil dependency (the bulk of configure time) are only compiled
+  # on a cache miss.
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Replicates the "x64 Native Tools Command Prompt for VS" the README
+      # requires, so MSVC and vcpkg have their build environment set up.
+      - name: Set up MSVC (x64) environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Replaces the removed vcpkg x-gha backend: cache vcpkg's binary package
+      # store directly. Keyed on the manifest and the pinned registry baseline,
+      # so the cache is rebuilt only when dependencies or the baseline change.
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      # README step 4: configure. Use the base `vcpkg` preset rather than
+      # `default`, so VCPKG_ROOT comes from the runner's environment
+      # (GitHub-hosted Windows runners ship a bootstrapped vcpkg at C:\vcpkg)
+      # instead of the developer-specific path baked into CMakeUserPresets.json.
+      # vcpkg manifest mode fetches protobuf and libusb (per vcpkg.json).
+      #
+      # Open3D is optional (see README "Open3D (optional)"). This CI builds
+      # without it via -DMDX_WITH_OPEN3D=OFF, so the mesh reconstruction
+      # endpoints are compiled out and no Open3D download is needed.
+      - name: Configure
+        shell: pwsh
+        run: |
+          # vcpkg errors if the binary-cache dir doesn't exist; ensure it's
+          # present on a cold cache (harmless when the cache was restored).
+          New-Item -ItemType Directory -Force -Path "${env:VCPKG_DEFAULT_BINARY_CACHE}" | Out-Null
+          cmake --preset=vcpkg -DMDX_WITH_OPEN3D=OFF
+
+      - name: Build (Release)
+        shell: pwsh
+        run: cmake --build build --config Release
