@@ -9,7 +9,8 @@
         {
             "sensor_count": 1,
             "label": "mid-size single -- PLACEHOLDER, MEASURE BEFORE USE",
-            "tip_offset_m": [0.157, 0.0, 0.0]
+            "tip_offset_m": [0.157, 0.0, 0.0],
+            "tip_rotation_zyx_deg": [0.0, 0.0, 0.0]
         }
     ],
     "minimum_contact_force": 0.35,
