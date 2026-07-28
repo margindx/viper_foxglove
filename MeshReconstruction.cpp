@@ -4,6 +4,9 @@
 
 #include "MeshReconstruction.hpp"
 
+// This translation unit is empty unless the project is built with Open3D.
+#ifdef MDX_WITH_OPEN3D
+
 std::vector<Eigen::Vector3d> mdx::geometry::MatrixToVector3dVector(const Eigen::MatrixXd &matrix) {
     std::vector<Eigen::Vector3d> vector;
     vector.reserve(matrix.rows());
@@ -240,3 +243,5 @@ template std::optional<Eigen::Vector3<float>> mdx::geometry::RayPick<float>(
         const Eigen::Vector3<float>&,
         const Eigen::Vector3<float>&,
         std::optional<open3d::core::Device>);
+
+#endif // MDX_WITH_OPEN3D

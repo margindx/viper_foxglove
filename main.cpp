@@ -15,6 +15,7 @@ using json = nlohmann::json;
 #include <csignal>
 #include <functional>
 #include <filesystem>
+#include <fstream>
 #include <cstdint>
 
 using namespace std;
@@ -46,6 +47,7 @@ void launchFoxglove(std::string config_filename) {
     bool contact_require_f2 = true;
     bool contact_require_f3 = true;
     bool contact_require_f4 = true;
+    bool generate_geometry = true;
     std::string pressure_usb_id = "";   // "VID:PID" hex; required, no default
 
     if (std::filesystem::exists(config_filename))
@@ -67,7 +69,7 @@ void launchFoxglove(std::string config_filename) {
         }
         if (settings.contains("minimum_contact_force"))
         {
-            min_contact_force = settings["minimum_contact_force"];            
+            min_contact_force = settings["minimum_contact_force"];
         }
         if (settings.contains("pressure_usb_id"))
         {
@@ -93,6 +95,10 @@ void launchFoxglove(std::string config_filename) {
         {
             contact_require_f4 = settings["contact_require_f4"];
         }
+        if (settings.contains("generate_geometry"))
+        {
+            generate_geometry = settings["generate_geometry"];
+        }
 
         cout << "    Done parsing.\n";
     }
@@ -112,12 +118,16 @@ void launchFoxglove(std::string config_filename) {
     cout << "    contact_require_f2:" << contact_require_f2 << endl;
     cout << "    contact_require_f3:" << contact_require_f3 << endl;
     cout << "    contact_require_f4:" << contact_require_f4 << endl;
+    cout << "    generate_geometry:" << generate_geometry << endl;
     // ---- End of runtime config parsing ---- //
 
     std::filesystem::path mcapPath = "viper.mcap";
     std::filesystem::remove(mcapPath);
 
     auto fgInterface = FoxgloveInterface{"viper.mcap"};
+    // Must be set before the Viper is constructed: its constructor starts
+    // streaming, and publishPose (geometry accumulation) can fire immediately.
+    fgInterface.setGenerateGeometry(generate_geometry);
     std::this_thread::sleep_for(1000ms);
 
     Viper viper{&fgInterface, 10, 100};
