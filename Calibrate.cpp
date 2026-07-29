@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <thread>
 
@@ -252,14 +253,24 @@ int runCalibration(const std::string &configPath) {
 
     std::cout << "You will need: a flat surface, and a straightedge for the last step.\n";
 
-    auto fgInterface = FoxgloveInterface{"viper-calibration.mcap"};
+    // Held by optional so a failure to start (an unwritable directory, a stale
+    // recording still held open) reports and exits rather than escaping as an
+    // uncaught exception and aborting the process.
+    std::optional<FoxgloveInterface> fgInterface;
+    try {
+        fgInterface.emplace("viper-calibration.mcap");
+    } catch (const std::exception &e) {
+        std::cerr << "Could not start the Foxglove interface: " << e.what() << "\n";
+        return 1;
+    }
+
     std::this_thread::sleep_for(1000ms);
 
     // Existing profiles are loaded so the connected sensor count can be matched
     // against them for the before/after comparison, but their absence is fine.
     auto profiles = loadProfilesIfPresent(configPath);
 
-    Viper viper{&fgInterface, profiles, 10, 100, /*calibrationMode=*/true};
+    Viper viper{&fgInterface.value(), profiles, 10, 100, /*calibrationMode=*/true};
 
     std::cout << "Waiting for pose data...\n";
     for (int i = 0; i < 250 && !viper.latestFusedPose().has_value(); i++) {
