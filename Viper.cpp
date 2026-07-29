@@ -142,22 +142,50 @@ void Viper::publishContinuous() {
 
     SENFRAMEDATA *pfd;
 
+    // Frames that never reach the publish path. Dropping them is correct -- the
+    // payload cannot be trusted -- but doing it silently made a stream that
+    // publishes nothing indistinguishable from a device that was never sending,
+    // with no diagnostic anywhere to tell the two apart.
+    uint64_t sizeMismatchedFrames = 0;
+    uint64_t crcFailedFrames = 0;
 
     while (isContinuous) {
         br = pnoQueue_.wait_and_pop(respPkg, respSize);
 
-        if (br && (br == (*(uint32_t*)(respPkg+4)+8))) {
-            crc = calculateCrc16(respPkg, br-4);
+        if (!br)
+            continue;   // nothing arrived within the queue's wait
 
-            if (validateCrc(crc, respPkg, br-4)) {
-	        nSensors = *(uint32_t*)(respPkg + 20);
-                static bool printed = false; if (!printed) { std::cout << "Using " << nSensors << " position sensors" << std::endl; printed = true; }
-	    	pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
-                frame = *(uint32_t*)(respPkg + 12);
-
-                pnoToFoxgloveSceneUpdate(pfd, nSensors);
+        const uint32_t declaredSize = *(uint32_t*)(respPkg + 4) + 8;
+        if (br != declaredSize) {
+            if ((++sizeMismatchedFrames % 100) == 1) {
+                std::stringstream ss;
+                ss << "Dropped a PNO frame whose length disagrees with its header ("
+                   << sizeMismatchedFrames << " frame(s) so far): received " << br
+                   << " bytes, header declares " << declaredSize;
+                fgInterface_->logWarning(ss.str());
             }
+            continue;
         }
+
+        crc = calculateCrc16(respPkg, br-4);
+
+        if (!validateCrc(crc, respPkg, br-4)) {
+            if ((++crcFailedFrames % 100) == 1) {
+                std::stringstream ss;
+                ss << "Dropped a PNO frame that failed its CRC (" << crcFailedFrames
+                   << " frame(s) so far): computed " << crc << ", frame carries "
+                   << *(uint32_t*)(respPkg + br - 4);
+                fgInterface_->logWarning(ss.str());
+            }
+            continue;
+        }
+
+        nSensors = *(uint32_t*)(respPkg + 20);
+        static bool printed = false; if (!printed) { std::cout << "Using " << nSensors << " position sensors" << std::endl; printed = true; }
+        pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
+        frame = *(uint32_t*)(respPkg + 12);
+
+        pnoToFoxgloveSceneUpdate(pfd, nSensors);
     }
 
     br = pnoQueue_.wait_and_pop(respPkg, respSize);
