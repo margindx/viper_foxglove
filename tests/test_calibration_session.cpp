@@ -194,7 +194,7 @@ TEST_CASE("the session walks all three steps", "[session]") {
     feedDirectionCapture(session, kFaceNormalSensor, kSurfaceNormal, 21);
     REQUIRE(session.readyToAdvance());
     REQUIRE(session.advance());
-    REQUIRE(session.step() == CalibrationStep::Straightedge);
+    REQUIRE(session.step() == CalibrationStep::SecondFlat);
 
     feedDirectionCapture(session, kLongAxisSensor, kEdgeDirection, 31);
     REQUIRE(session.readyToAdvance());

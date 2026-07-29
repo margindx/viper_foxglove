@@ -23,10 +23,12 @@
 //      v.t. Flat placements therefore say nothing whatsoever about the
 //      translation; they determine orientation only.
 //
-//   B2. Straightedge -- the 10 mm footprint edge is butted against a straight
-//      reference at several positions, putting the footprint long axis onto a
-//      fixed world direction. Same solver as B1, and together the two
-//      directions determine the full tip rotation.
+//   B2. Second flat -- a flat of the housing that is not the imaging face is
+//      laid on the same surface, at several spins. Structurally identical to
+//      B1, just a different face, and together the two directions determine the
+//      full tip rotation. The direction it recovers is that flat's normal, not
+//      the footprint axis; relating the two is a design constant supplied to
+//      tipRotationFromAxes as a roll offset.
 //
 // Everything here is pure: no hardware, no I/O, no Foxglove types. Depends only
 // on the vendored Eigen headers under dep/.
@@ -129,8 +131,8 @@ std::optional<PivotResult> solvePointPivot(const std::vector<CalibrationSample> 
 /// A sensor-frame direction that maps onto a fixed world direction across all
 /// samples (motions B1 and B2).
 struct DirectionResult {
-    /// The direction in the sensor frame -- the face normal for B1, the
-    /// footprint long axis for B2.
+    /// The direction in the sensor frame -- the imaging face normal for B1, the
+    /// second housing flat's normal for B2.
     Eigen::Vector3d sensorDirection{Eigen::Vector3d::UnitX()};
     /// The corresponding fixed direction in tracker coordinates.
     Eigen::Vector3d worldDirection{Eigen::Vector3d::UnitX()};
@@ -176,15 +178,25 @@ std::optional<PlaneTranslationResult> solvePlaneTranslation(
 /// Build the sensor-to-tip rotation from the two calibrated directions.
 ///
 /// The tip frame follows the convention used by tip_offset_m and by the
-/// downstream probe geometry: +x along the probe (the face normal), +y along
-/// the 10 mm footprint edge, +z completing the right-handed set. The long axis
-/// is orthogonalised against the face normal, so it need not be measured
-/// perfectly perpendicular.
+/// downstream probe geometry: +x along the probe (the imaging face normal), +y
+/// along the footprint's long axis, +z completing the right-handed set.
+///
+/// `inPlaneReferenceSensor` is whatever second direction the capture pinned
+/// down. It is orthogonalised against the face normal, so it need not be
+/// perpendicular to it -- only non-parallel.
+///
+/// `rollOffsetDeg` rotates the resulting +y about +x, and is how a reference
+/// that is not itself the footprint axis gets related to it. Laying a second
+/// flat of the housing on the table recovers that flat's normal, not the
+/// footprint direction; the angle between them, about the probe axis, is a
+/// fixed property of the probe's design and has to come from CAD. Zero means
+/// the reference already is the footprint axis.
 ///
 /// Returns nullopt if the two directions are parallel enough that the third
 /// axis is undetermined.
 std::optional<Eigen::Quaterniond> tipRotationFromAxes(const Eigen::Vector3d &faceNormalSensor,
-                                                      const Eigen::Vector3d &longAxisSensor);
+                                                      const Eigen::Vector3d &inPlaneReferenceSensor,
+                                                      double rollOffsetDeg = 0.0);
 
 /// Angle of a rotation, degrees -- used to report how far a solved tip rotation
 /// sits from identity, so a correction that is really just noise can be seen

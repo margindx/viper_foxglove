@@ -209,7 +209,7 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
     std::cout << "  Pivot residual (RMS)  " << std::fixed << std::setprecision(2)
               << outcome.pivot.residualRms * 1000.0 << " mm\n";
     std::cout << "  Residual per axis     " << formatMillimetres(outcome.pivot.residualRmsProbeFrame)
-              << "  (probe frame: x along probe, y along the 10 mm footprint edge)\n";
+              << "  (probe frame: x along probe, y along the footprint long axis)\n";
     std::cout << "  Samples / condition   " << outcome.pivot.sampleCount << " / " << std::fixed
               << std::setprecision(1) << outcome.pivot.conditionNumber << "\n";
 
@@ -244,9 +244,9 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
         std::cout << "    Face normal fit     " << std::setprecision(3)
                   << outcome.faceNormal.residualDeg << " deg RMS, separation "
                   << outcome.faceNormal.separation << "\n";
-        std::cout << "    Long axis fit       " << std::setprecision(3)
-                  << outcome.longAxis.residualDeg << " deg RMS, separation "
-                  << outcome.longAxis.separation << "\n";
+        std::cout << "    Second flat fit     " << std::setprecision(3)
+                  << outcome.secondFlat.residualDeg << " deg RMS, separation "
+                  << outcome.secondFlat.separation << "\n";
 
         if (outcome.rotationFromIdentityDeg < 1.0) {
             std::cout << "    NOTE: this is within a degree of identity and is more likely "
@@ -271,7 +271,8 @@ int runCalibration(const std::string &configPath) {
         return 1;
     }
 
-    std::cout << "You will need: a flat surface, and a straightedge for the last step.\n";
+    std::cout << "You will need a flat surface, and a probe whose housing has a second flat\n"
+                 "face (not the imaging face) that can rest on it.\n";
 
     // Held by optional so a failure to start (an unwritable directory, a stale
     // recording still held open) reports and exits rather than escaping as an
@@ -341,7 +342,37 @@ int runCalibration(const std::string &configPath) {
         session.advance();
     }
 
-    const auto outcome = session.solve();
+    // Step 3 recovers the second flat's normal, not the footprint's long axis.
+    // Relating the two is a property of the probe's design, so it has to be
+    // supplied rather than measured -- and it is asked for here, at run time,
+    // so discovering it is 90 rather than 0 costs an answer instead of a
+    // rebuild. It only affects roll about the probe axis; the tip position is
+    // already fixed by step 1.
+    double secondFlatRollDeg = 0.0;
+    {
+        std::cout << "\nStep 3 measured the second flat's normal. To turn that into the\n"
+                     "footprint's orientation I need the angle between them, about the probe\n"
+                     "axis, from the probe's design. Often 0 or 90.\n";
+
+        std::string answer;
+        if (!prompt("Angle from the second flat's normal to the footprint long axis, in degrees "
+                    "[0]: ",
+                    answer)) {
+            std::cout << "Aborted; nothing was written.\n";
+            return 0;
+        }
+
+        if (!answer.empty()) {
+            try {
+                secondFlatRollDeg = std::stod(answer);
+            } catch (const std::exception &) {
+                std::cerr << "Not a number: \"" << answer << "\". Nothing was written.\n";
+                return 1;
+            }
+        }
+    }
+
+    const auto outcome = session.solve(secondFlatRollDeg);
     if (!outcome.has_value()) {
         std::cerr << "The captures could not be solved. Nothing was written.\n";
         return 1;

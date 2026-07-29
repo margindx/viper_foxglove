@@ -342,6 +342,42 @@ TEST_CASE("tip rotation is built from the two calibrated directions", "[rotation
         REQUIRE(std::abs(q->coeffs().dot(mount.coeffs())) > 1.0 - 1e-9);
     }
 
+    SECTION("a roll offset swings the footprint axis about the probe axis") {
+        // Step 3 recovers a second housing flat's normal, not the footprint
+        // axis; the CAD angle between them is applied here. A 90 degree offset
+        // must put +y where +z was.
+        const auto plain = tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY());
+        const auto rolled =
+                tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY(), 90.0);
+
+        REQUIRE(plain.has_value());
+        REQUIRE(rolled.has_value());
+
+        const Eigen::Vector3d yPlain = *plain * Eigen::Vector3d::UnitY();
+        const Eigen::Vector3d yRolled = *rolled * Eigen::Vector3d::UnitY();
+
+        REQUIRE(yPlain.isApprox(Eigen::Vector3d::UnitY(), 1e-9));
+        REQUIRE(yRolled.isApprox(Eigen::Vector3d::UnitZ(), 1e-9));
+
+        // The probe axis is untouched: roll cannot move the tip direction.
+        REQUIRE((*rolled * Eigen::Vector3d::UnitX()).isApprox(Eigen::Vector3d::UnitX(), 1e-9));
+    }
+
+    SECTION("a zero roll offset changes nothing") {
+        const auto a = tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY());
+        const auto b = tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY(), 0.0);
+
+        REQUIRE(a.has_value());
+        REQUIRE(b.has_value());
+        REQUIRE(std::abs(a->coeffs().dot(b->coeffs())) > 1.0 - 1e-12);
+    }
+
+    SECTION("a non-finite roll offset is refused") {
+        REQUIRE_FALSE(tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY(),
+                                          std::numeric_limits<double>::quiet_NaN())
+                              .has_value());
+    }
+
     SECTION("parallel directions leave the third axis undetermined") {
         REQUIRE_FALSE(
                 tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitX()).has_value());

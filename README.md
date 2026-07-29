@@ -186,8 +186,10 @@ This is a **bench procedure**, run at the machine the Viper is attached to. Unli
 **not** require an existing `probe_profiles` entry for the connected sensor count — producing that entry is
 the point, so a probe can be calibrated for the first time. It writes to the same config file it read.
 
-You need a flat surface and a straightedge. There are three captures, and the program will not let you leave
-one until the data can actually support a solve — it shows live what is still missing.
+You need a flat surface, and a probe whose housing has a second flat face (not the imaging face) that can
+rest on it. There are three captures, and the program will not let you leave one until the data can actually
+support a solve — it shows live what is still missing. Nothing is sampled until you have read the step and
+pressed Enter, so you can get the probe into position first.
 
 1. **Tip pivot.** Rest the tip on the surface, hold that spot, and rock the probe through as wide a range of
    angles as you can without letting the tip slide. Vary the *direction* of tilt, not just how far: a sweep
@@ -195,9 +197,15 @@ one until the data can actually support a solve — it shows live what is still 
 2. **Flat placements.** Lay the imaging face flat on the surface, lift, rotate about the probe's own axis,
    and set it down flat again. Repeat at many rotations. Keep the face flat — do not tilt. This solves the
    face normal.
-3. **Straightedge.** With the face still flat, butt its long (10 mm) edge against a straightedge and reseat a
-   few times. This solves the footprint long axis, which together with the face normal gives the full tip
-   rotation.
+3. **Second flat.** The same action as step 2, on a different face: lay a flat of the *housing* — any flat
+   that is not the imaging face — against the surface, lift, rotate about that face's normal, and set it
+   down again. Use the same flat throughout. This solves that flat's normal, which together with the imaging
+   face normal gives the full tip rotation.
+
+   Because the recovered direction is the housing flat's normal rather than the footprint's long axis, the
+   program then asks for the angle between the two, measured about the probe axis. That is a property of the
+   probe's design and comes from CAD, not from the capture — commonly `0` or `90` degrees. It affects only
+   roll; the tip position is already fixed by step 1.
 
 The result is printed with its residuals before anything is written, and you are asked to confirm. The
 rotation is confirmed separately, so you can accept a new offset while leaving the orientation alone. The
@@ -212,7 +220,7 @@ anisotropic — up to about ±5 mm along the footprint but only ±0.5 mm across 
 **per axis in the probe frame** rather than as one number:
 
 ```
-Residual per axis     [0.31, 2.85, 0.44] mm  (probe frame: x along probe, y along the 10 mm footprint edge)
+Residual per axis     [0.31, 2.85, 0.44] mm  (probe frame: x along probe, y along the footprint long axis)
 ```
 
 A large `y` relative to `x` and `z` is the expected signature of contact migration. If the **across**-footprint

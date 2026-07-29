@@ -357,24 +357,36 @@ std::optional<PlaneTranslationResult> solvePlaneTranslation(
 }
 
 std::optional<Eigen::Quaterniond> tipRotationFromAxes(const Eigen::Vector3d &faceNormalSensor,
-                                                      const Eigen::Vector3d &longAxisSensor) {
-    if (!faceNormalSensor.allFinite() || !longAxisSensor.allFinite())
+                                                      const Eigen::Vector3d &inPlaneReferenceSensor,
+                                                      double rollOffsetDeg) {
+    if (!faceNormalSensor.allFinite() || !inPlaneReferenceSensor.allFinite())
         return std::nullopt;
 
-    if (!(faceNormalSensor.norm() > 1e-9) || !(longAxisSensor.norm() > 1e-9))
+    if (!std::isfinite(rollOffsetDeg))
+        return std::nullopt;
+
+    if (!(faceNormalSensor.norm() > 1e-9) || !(inPlaneReferenceSensor.norm() > 1e-9))
         return std::nullopt;
 
     const Eigen::Vector3d x = faceNormalSensor.normalized();
 
-    // Orthogonalise the long axis against the face normal, so the straightedge
-    // step does not have to be perfectly perpendicular to the surface step.
-    Eigen::Vector3d y = longAxisSensor.normalized();
+    // Orthogonalise the reference against the face normal, so the second
+    // capture does not have to be perpendicular to the first -- only
+    // non-parallel.
+    Eigen::Vector3d y = inPlaneReferenceSensor.normalized();
     y -= x * x.dot(y);
 
     if (!(y.norm() > 1e-6))
         return std::nullopt;   // the two directions are parallel; z undetermined
 
     y.normalize();
+
+    // Swing the in-plane reference onto the footprint axis. Needed whenever the
+    // captured direction is not itself the footprint axis -- a second housing
+    // flat, say -- and the offset between them is known from the design.
+    if (rollOffsetDeg != 0.0)
+        y = Eigen::AngleAxisd(rollOffsetDeg * kDegToRad, x) * y;
+
     const Eigen::Vector3d z = x.cross(y);
 
     Eigen::Matrix3d rotation;

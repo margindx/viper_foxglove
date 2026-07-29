@@ -24,8 +24,8 @@ enum class CalibrationStep {
     RockingPivot,
     /// Motion B1: face laid flat on the surface at varied spins and positions.
     FlatPlacements,
-    /// Motion B2: footprint long edge butted against a straightedge.
-    Straightedge,
+    /// Motion B2: a second flat of the housing laid on the same surface.
+    SecondFlat,
     /// All captures complete; ready to solve.
     Done,
 };
@@ -55,8 +55,10 @@ struct CalibrationOutcome {
     std::optional<Eigen::Quaterniond> tipRotation;
 
     PivotResult pivot;
+    /// Imaging face normal, in the sensor frame, from step 2.
     DirectionResult faceNormal;
-    DirectionResult longAxis;
+    /// The direction step 3 pinned down -- the second housing flat's normal.
+    DirectionResult secondFlat;
 
     /// Independent offset estimate from the plane constraint applied to the
     /// rocking samples. Absent when that system was too poorly conditioned.
@@ -101,7 +103,14 @@ public:
 
     /// Solve the whole calibration. Only meaningful once every step is
     /// captured; returns nullopt if any required solve fails.
-    std::optional<CalibrationOutcome> solve() const;
+    ///
+    /// `secondFlatRollDeg` relates the direction recovered by the third step to
+    /// the footprint's long axis, measured about the probe axis. Step 3 laying a
+    /// second housing flat on the table recovers that flat's normal, which is
+    /// not the footprint direction; the angle between them is a property of the
+    /// probe's design and comes from CAD, not from the capture. Zero means the
+    /// captured direction already is the footprint axis.
+    std::optional<CalibrationOutcome> solve(double secondFlatRollDeg = 0.0) const;
 
 private:
     const std::vector<CalibrationSample> &samplesFor(CalibrationStep step) const;
