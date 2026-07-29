@@ -1,7 +1,18 @@
 {
-    "offset_x": 0.157,
-    "offset_y": 0.0,
-    "offset_z": 0.0,
+    "probe_profiles": [
+        {
+            "sensor_count": 3,
+            "label": "legacy triple",
+            "tip_offset_m": [0.157, 0.0, 0.0],
+            "tip_rotation_zyx_deg": [0.0, 0.0, 0.0]
+        },
+        {
+            "sensor_count": 1,
+            "label": "mid-size single -- PLACEHOLDER, MEASURE BEFORE USE",
+            "tip_offset_m": [0.157, 0.0, 0.0],
+            "tip_rotation_zyx_deg": [0.0, 0.0, 0.0]
+        }
+    ],
     "minimum_contact_force": 0.35,
     "pressure_usb_id": "2886:8064",
     "use_hardware_contact": true,
@@ -11,9 +22,12 @@
     "contact_require_f4": true,
     "generate_geometry": true,
     "_comment": {
-        "offset_x": "along-probe offset from sensor to tip",
-        "offset_y": "horizontal offset from sensor to probe center (keep at 0)",
-        "offset_z": "horizontal offset from sensor to probe center (keep at 0)",
+        "probe_profiles": "REQUIRED. One entry per probe design, identified by how many EM sensors it presents. The profile is chosen automatically from the sensor count in the first Viper frame and then latched, so switching probes means changing what is plugged in -- nothing here needs editing to switch. Startup fails if this block is missing or malformed; there is no default tip offset.",
+        "probe_profiles.sensor_count": "REQUIRED. Number of connected EM sensors this profile applies to. Each count may appear at most once.",
+        "probe_profiles.label": "Optional name, echoed to the log when the profile is selected.",
+        "probe_profiles.tip_offset_m": "REQUIRED. [x, y, z] offset in metres from the fused sensor origin to the probe tip, expressed in the sensor frame. x is the along-probe direction; y and z are horizontal offsets to the probe centre and are normally 0.",
+        "probe_profiles.tip_rotation_zyx_deg": "Optional [azimuth, elevation, roll] in degrees, rotating the sensor frame onto the tip frame (the Viper's own Z-Y-X convention). Omit for identity, which is correct when the sensor is mounted along the probe axis. It rotates the published orientation as well as placing the tip.",
+        "probe_profiles.WARNING": "The 1-sensor tip_offset_m above is a placeholder copied from the 3-sensor value and is NOT correct. The 3-sensor number is the centroid-of-three to tip distance; a single sensor sits somewhere else on the probe. Measure it before trusting single-sensor data.",
         "minimum_contact_force": "(NOT USED) the force threshold, above which we have contact",
         "pressure_usb_id": "USB VID:PID (hex) of the pressure sensor; the serial port is auto-detected by matching this. Required (no port fallback). Windows and Linux only; must match exactly one connected device or the sensor stays disabled",
         "use_hardware_contact": "If true, use the 0/1 contact flag reported by the device; if false, derive contact from force thresholds and contact_require_fN",

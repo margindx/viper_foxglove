@@ -144,6 +144,8 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         dep/serialib/serialib.cpp
         SensorData.cpp
         SensorData.hpp
+        ProbeProfile.cpp
+        ProbeProfile.hpp
         Viper.cpp
         Viper.hpp
         FoxgloveInterface.cpp
@@ -216,3 +218,35 @@ if(OPEN3D_ENABLED)
 endif()
 
 target_link_libraries(viper PRIVATE protobuf::libprotobuf)
+
+# ---- Unit tests -------------------------------------------------------------
+# ProbeProfile depends only on the vendored Eigen and nlohmann headers under
+# dep/, so the test target needs neither Open3D, the Foxglove SDK, nor libusb —
+# it builds and runs without any hardware attached.
+#
+# Catch2 is looked up quietly rather than REQUIRED so a developer without it can
+# still build the main target. CI runs ctest with --no-tests=error, so a missing
+# Catch2 there fails the build rather than silently skipping the tests.
+enable_testing()
+find_package(Catch2 3 CONFIG QUIET)
+
+if(Catch2_FOUND)
+    add_executable(viper_tests
+            tests/test_probe_profile.cpp
+            ProbeProfile.cpp
+            ProbeProfile.hpp)
+
+    target_include_directories(viper_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/dep)
+
+    target_link_libraries(viper_tests PRIVATE Catch2::Catch2WithMain)
+
+    if(WIN32)
+        target_compile_definitions(viper_tests PRIVATE NOMINMAX _USE_MATH_DEFINES)
+    endif()
+
+    add_test(NAME viper_tests COMMAND viper_tests)
+else()
+    message(STATUS "Catch2 not found - skipping the viper_tests target")
+endif()
