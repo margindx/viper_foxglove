@@ -117,10 +117,31 @@ bool captureStep(CalibrationSession &session, Viper &viper) {
     const auto info = session.currentStep();
 
     std::cout << "\n=== " << info.title << " ===\n" << info.instructions << "\n\n";
-    std::cout << "Capturing. Press Enter when the prompt says the capture is sufficient,\n"
-                 "or type 'r' then Enter to restart this step, or 'q' to abort.\n\n";
 
     while (true) {
+        // Nothing is sampled until the operator says to start. Beginning the
+        // moment the step opened meant the first samples were of the probe
+        // being picked up and positioned -- they polluted the solve and counted
+        // towards the capture gate, so a stationary probe looked like progress.
+        // This prompt also flushes the instructions above, which otherwise sat
+        // in the buffer while acquisition was already running.
+        const bool resuming = session.sampleCount(info.step) > 0;
+
+        std::string answer;
+        if (!prompt(resuming
+                            ? "Reposition, then press Enter to resume capturing (q to abort): "
+                            : "Position the probe, then press Enter to start capturing (q to abort): ",
+                    answer)) {
+            return false;
+        }
+
+        if (answer == "q" || answer == "Q")
+            return false;
+
+        std::cout << "\nCapturing. Press Enter when the prompt says the capture is sufficient,\n"
+                     "or type 'r' then Enter to restart this step, or 'q' to abort.\n\n"
+                  << std::flush;
+
         // Poll on a worker so the operator's Enter is not queued behind a sleep.
         std::atomic_bool capturing{true};
         std::thread poller{[&] {
@@ -154,7 +175,6 @@ bool captureStep(CalibrationSession &session, Viper &viper) {
             }
         }};
 
-        std::string answer;
         const bool gotLine = prompt("", answer);
 
         // Stop and join before touching the session again: everything below
