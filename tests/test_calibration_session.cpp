@@ -36,10 +36,10 @@ Pose makePose(const Eigen::Vector3d &position, const Eigen::Quaterniond &orienta
 
 /// Ground truth used by every case below.
 const Eigen::Vector3d kTipOffset{0.157, 0.0, 0.0};
-const Eigen::Vector3d kFaceNormalSensor = Eigen::Vector3d::UnitX();
-const Eigen::Vector3d kLongAxisSensor = Eigen::Vector3d::UnitY();
+/// The housing flat's normal is perpendicular to the probe axis, which the
+/// pivot recovers as the tip offset direction (+x here).
+const Eigen::Vector3d kBodyFlatSensor = Eigen::Vector3d::UnitY();
 const Eigen::Vector3d kSurfaceNormal = Eigen::Vector3d::UnitZ();
-const Eigen::Vector3d kEdgeDirection = Eigen::Vector3d::UnitX();
 
 void feedRockingCapture(CalibrationSession &session, int count = 120) {
     const Eigen::Vector3d pivot{0.2, -0.1, 0.4};
@@ -75,17 +75,14 @@ void feedDirectionCapture(CalibrationSession &session, const Eigen::Vector3d &se
     }
 }
 
-/// Drive a session through all three captures.
+/// Drive a session through both captures.
 CalibrationSession completeSession() {
     CalibrationSession session;
 
     feedRockingCapture(session);
     session.advance();
 
-    feedDirectionCapture(session, kFaceNormalSensor, kSurfaceNormal, 21);
-    session.advance();
-
-    feedDirectionCapture(session, kLongAxisSensor, kEdgeDirection, 31);
+    feedDirectionCapture(session, kBodyFlatSensor, kSurfaceNormal, 21);
     session.advance();
 
     return session;
@@ -129,7 +126,7 @@ TEST_CASE("the session starts on the pivot step", "[session]") {
 
     REQUIRE(session.step() == CalibrationStep::RockingPivot);
     REQUIRE_FALSE(session.readyToAdvance());
-    REQUIRE(session.currentStep().title.find("1 of 3") != std::string::npos);
+    REQUIRE(session.currentStep().title.find("1 of 2") != std::string::npos);
 }
 
 TEST_CASE("near-duplicate poses are discarded", "[session][decimation]") {
@@ -183,20 +180,15 @@ TEST_CASE("a step cannot be skipped before it is ready", "[session][gating]") {
     REQUIRE_FALSE(session.advance());
 }
 
-TEST_CASE("the session walks all three steps", "[session]") {
+TEST_CASE("the session walks both steps", "[session]") {
     CalibrationSession session;
 
     feedRockingCapture(session);
     REQUIRE(session.readyToAdvance());
     REQUIRE(session.advance());
-    REQUIRE(session.step() == CalibrationStep::FlatPlacements);
+    REQUIRE(session.step() == CalibrationStep::BodyFlat);
 
-    feedDirectionCapture(session, kFaceNormalSensor, kSurfaceNormal, 21);
-    REQUIRE(session.readyToAdvance());
-    REQUIRE(session.advance());
-    REQUIRE(session.step() == CalibrationStep::SecondFlat);
-
-    feedDirectionCapture(session, kLongAxisSensor, kEdgeDirection, 31);
+    feedDirectionCapture(session, kBodyFlatSensor, kSurfaceNormal, 21);
     REQUIRE(session.readyToAdvance());
     REQUIRE(session.advance());
     REQUIRE(session.step() == CalibrationStep::Done);
@@ -210,10 +202,10 @@ TEST_CASE("restarting a step discards only that step", "[session]") {
     REQUIRE(captured > 0);
 
     session.advance();
-    feedDirectionCapture(session, kFaceNormalSensor, kSurfaceNormal, 21);
+    feedDirectionCapture(session, kBodyFlatSensor, kSurfaceNormal, 21);
     session.restartStep();
 
-    REQUIRE(session.sampleCount(CalibrationStep::FlatPlacements) == 0);
+    REQUIRE(session.sampleCount(CalibrationStep::BodyFlat) == 0);
     REQUIRE(session.sampleCount(CalibrationStep::RockingPivot) == captured);
 }
 
@@ -228,7 +220,7 @@ TEST_CASE("a completed session recovers the known transform", "[session][solve]"
         REQUIRE((outcome->tipOffset - kTipOffset).norm() < 1e-8);
     }
 
-    SECTION("the rotation is identity for a nominally mounted probe") {
+    SECTION("the rotation is recovered from the pivot axis and the body flat") {
         REQUIRE(outcome->tipRotation.has_value());
         REQUIRE(outcome->rotationFromIdentityDeg < 1e-6);
     }

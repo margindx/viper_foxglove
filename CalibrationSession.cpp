@@ -31,24 +31,34 @@ bool isUsable(const Pose &pose) {
 StepInfo describeStep(CalibrationStep step) {
     switch (step) {
         case CalibrationStep::RockingPivot:
-            return {step, "1 of 3: tip pivot",
+            return {step, "1 of 2: tip pivot",
                     "Rest the probe tip on a flat surface and hold that spot. Rock and rotate "
                     "the probe through as wide a range of angles as you can without letting the "
-                    "tip slide. Vary the direction you tilt in, not just how far."};
+                    "tip slide. Vary the direction you tilt in, not just how far.\n"
+                    "\n"
+                    "       \\      |      /\n"
+                    "        \\     |     /\n"
+                    "         \\    |    /     probe body\n"
+                    "          \\   |   /\n"
+                    "           \\  |  /\n"
+                    "            \\ | /\n"
+                    "       ------o------  surface\n"
+                    "            tip stays on one spot"};
 
-        case CalibrationStep::FlatPlacements:
-            return {step, "2 of 3: flat placements",
-                    "Lay the probe's imaging face flat against the surface. Lift it, rotate it "
-                    "about its own axis, and set it down flat again somewhere else. Repeat at "
-                    "many different rotations. Keep the face flat -- do not tilt it."};
-
-        case CalibrationStep::SecondFlat:
-            return {step, "3 of 3: second flat",
-                    "Same action as step 2, on a different face. Pick a flat on the probe housing "
-                    "that is NOT the imaging face, lay it flat against the surface, then lift, "
-                    "rotate the probe about that face's normal, and set it down flat again. "
-                    "Repeat at many different rotations. Use the same flat every time, and keep "
-                    "it flat -- do not tilt."};
+        case CalibrationStep::BodyFlat:
+            return {step, "2 of 2: body flat",
+                    "Lay the probe down on a flat of its housing -- the flattened side of the "
+                    "body, not the lens end -- so it rests stably on the surface. Then rotate it "
+                    "on the surface, like turning a clock hand, and re-place it at many different "
+                    "angles. Keep the same flat in contact throughout and keep it flat.\n"
+                    "\n"
+                    "       viewed from above:\n"
+                    "\n"
+                    "         ,------------------.\n"
+                    "         | S            lens|      rotate on the surface\n"
+                    "         `------------------'      and re-place  (clock hand)\n"
+                    "\n"
+                    "       use the same surface as step 1"};
 
         case CalibrationStep::Done:
             return {step, "Complete", "All captures gathered."};
@@ -65,12 +75,11 @@ CalibrationSession::CalibrationSession(CaptureCriteria pivotCriteria,
 const std::vector<CalibrationSample> &CalibrationSession::samplesFor(CalibrationStep step) const {
     switch (step) {
         case CalibrationStep::RockingPivot: return pivotSamples_;
-        case CalibrationStep::FlatPlacements: return flatSamples_;
-        case CalibrationStep::SecondFlat: return edgeSamples_;
+        case CalibrationStep::BodyFlat: return flatSamples_;
         case CalibrationStep::Done: break;
     }
 
-    return edgeSamples_;
+    return flatSamples_;
 }
 
 std::vector<CalibrationSample> &CalibrationSession::samplesFor(CalibrationStep step) {
@@ -115,11 +124,8 @@ DiversityMetrics CalibrationSession::metrics() const {
         case CalibrationStep::RockingPivot:
             return assessCapture(pivotSamples_, pivotCriteria_);
 
-        case CalibrationStep::FlatPlacements:
+        case CalibrationStep::BodyFlat:
             return assessDirectionCapture(flatSamples_, directionCriteria_);
-
-        case CalibrationStep::SecondFlat:
-            return assessDirectionCapture(edgeSamples_, directionCriteria_);
 
         case CalibrationStep::Done:
             break;
@@ -136,9 +142,8 @@ bool CalibrationSession::advance() {
         return false;
 
     switch (step_) {
-        case CalibrationStep::RockingPivot: step_ = CalibrationStep::FlatPlacements; break;
-        case CalibrationStep::FlatPlacements: step_ = CalibrationStep::SecondFlat; break;
-        case CalibrationStep::SecondFlat: step_ = CalibrationStep::Done; break;
+        case CalibrationStep::RockingPivot: step_ = CalibrationStep::BodyFlat; break;
+        case CalibrationStep::BodyFlat: step_ = CalibrationStep::Done; break;
         case CalibrationStep::Done: break;
     }
 
@@ -152,41 +157,40 @@ void CalibrationSession::restartStep() {
     samplesFor(step_).clear();
 }
 
-std::optional<CalibrationOutcome> CalibrationSession::solve(double secondFlatRollDeg) const {
+std::optional<CalibrationOutcome> CalibrationSession::solve(double bodyFlatRollDeg) const {
     const auto pivot = solvePointPivot(pivotSamples_);
     if (!pivot.has_value())
         return std::nullopt;
 
-    const auto faceNormal = solveCommonDirection(flatSamples_);
-    if (!faceNormal.has_value())
-        return std::nullopt;
-
-    const auto secondFlat = solveCommonDirection(edgeSamples_);
-    if (!secondFlat.has_value())
+    const auto bodyFlat = solveCommonDirection(flatSamples_);
+    if (!bodyFlat.has_value())
         return std::nullopt;
 
     CalibrationOutcome outcome;
     outcome.pivot = *pivot;
-    outcome.faceNormal = *faceNormal;
-    outcome.secondFlat = *secondFlat;
+    outcome.bodyFlat = *bodyFlat;
     outcome.tipOffset = pivot->tipOffset;
 
-    // The face normal is only defined up to sign by the direction solve. Pick
-    // the sense pointing from the sensor towards the tip, which is the
-    // direction the pivot already established.
-    Eigen::Vector3d face = faceNormal->sensorDirection;
-    if (face.dot(pivot->tipOffset) < 0.0)
-        face = -face;
+    // The probe axis comes free from step 1: the probe is straight and the tip
+    // lies on its axis, so the sensor-to-tip vector is that axis. Nothing needs
+    // to be captured for it, which is why standing the probe on its lens is no
+    // longer part of the procedure.
+    if (!(pivot->tipOffset.norm() > 1e-9))
+        return std::nullopt;
+
+    const Eigen::Vector3d probeAxis = pivot->tipOffset.normalized();
 
     outcome.tipRotation =
-            tipRotationFromAxes(face, secondFlat->sensorDirection, secondFlatRollDeg);
+            tipRotationFromAxes(probeAxis, bodyFlat->sensorDirection, bodyFlatRollDeg);
     if (outcome.tipRotation.has_value())
         outcome.rotationFromIdentityDeg = rotationAngleDeg(*outcome.tipRotation);
 
     // Second opinion: the plane constraint on the rocking samples, using the
     // surface normal the flat placements established. A different error model,
     // so agreement is meaningful.
-    outcome.planeCheck = solvePlaneTranslation(pivotSamples_, faceNormal->worldDirection);
+    // The world direction from step 2 is the surface normal, since the flat was
+    // laid on the same surface the tip was pivoted on.
+    outcome.planeCheck = solvePlaneTranslation(pivotSamples_, bodyFlat->worldDirection);
     if (outcome.planeCheck.has_value()) {
         outcome.offsetDisagreementM =
                 (outcome.planeCheck->tipOffset - outcome.tipOffset).norm();

@@ -272,8 +272,8 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
             }
 
             std::cout << "             The plane normal comes from step 2, whose fit was "
-                      << std::setprecision(3) << outcome.faceNormal.residualDeg
-                      << " deg RMS at separation " << outcome.faceNormal.separation
+                      << std::setprecision(3) << outcome.bodyFlat.residualDeg
+                      << " deg RMS at separation " << outcome.bodyFlat.separation
                       << ";\n             a poor figure there invalidates this check on its own.\n";
         }
     } else {
@@ -285,12 +285,9 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
         std::cout << "\n  Tip rotation (Z-Y-X)  " << formatDegrees(zyx) << "\n";
         std::cout << "    From identity       " << std::fixed << std::setprecision(3)
                   << outcome.rotationFromIdentityDeg << " deg\n";
-        std::cout << "    Face normal fit     " << std::setprecision(3)
-                  << outcome.faceNormal.residualDeg << " deg RMS, separation "
-                  << outcome.faceNormal.separation << "\n";
-        std::cout << "    Second flat fit     " << std::setprecision(3)
-                  << outcome.secondFlat.residualDeg << " deg RMS, separation "
-                  << outcome.secondFlat.separation << "\n";
+        std::cout << "    Body flat fit       " << std::setprecision(3)
+                  << outcome.bodyFlat.residualDeg << " deg RMS, separation "
+                  << outcome.bodyFlat.separation << "\n";
 
         if (outcome.rotationFromIdentityDeg < 1.0) {
             std::cout << "    NOTE: this is within a degree of identity and is more likely "
@@ -315,8 +312,8 @@ int runCalibration(const std::string &configPath) {
         return 1;
     }
 
-    std::cout << "You will need a flat surface, and a probe whose housing has a second flat\n"
-                 "face (not the imaging face) that can rest on it.\n";
+    std::cout << "You will need a flat surface, and a probe whose housing has a flat along its\n"
+                 "body that it can rest on.\n";
 
     // Held by optional so a failure to start (an unwritable directory, a stale
     // recording still held open) reports and exits rather than escaping as an
@@ -386,20 +383,20 @@ int runCalibration(const std::string &configPath) {
         session.advance();
     }
 
-    // Step 3 recovers the second flat's normal, not the footprint's long axis.
+    // Step 2 recovers the body flat's normal, not the footprint's long axis.
     // Relating the two is a property of the probe's design, so it has to be
     // supplied rather than measured -- and it is asked for here, at run time,
     // so discovering it is 90 rather than 0 costs an answer instead of a
     // rebuild. It only affects roll about the probe axis; the tip position is
     // already fixed by step 1.
-    double secondFlatRollDeg = 0.0;
+    double bodyFlatRollDeg = 0.0;
     {
-        std::cout << "\nStep 3 measured the second flat's normal. To turn that into the\n"
+        std::cout << "\nStep 2 measured the body flat's normal. To turn that into the\n"
                      "footprint's orientation I need the angle between them, about the probe\n"
                      "axis, from the probe's design. Often 0 or 90.\n";
 
         std::string answer;
-        if (!prompt("Angle from the second flat's normal to the footprint long axis, in degrees "
+        if (!prompt("Angle from the body flat's normal to the footprint long axis, in degrees "
                     "[0]: ",
                     answer)) {
             std::cout << "Aborted; nothing was written.\n";
@@ -408,7 +405,7 @@ int runCalibration(const std::string &configPath) {
 
         if (!answer.empty()) {
             try {
-                secondFlatRollDeg = std::stod(answer);
+                bodyFlatRollDeg = std::stod(answer);
             } catch (const std::exception &) {
                 std::cerr << "Not a number: \"" << answer << "\". Nothing was written.\n";
                 return 1;
@@ -416,7 +413,7 @@ int runCalibration(const std::string &configPath) {
         }
     }
 
-    const auto outcome = session.solve(secondFlatRollDeg);
+    const auto outcome = session.solve(bodyFlatRollDeg);
     if (!outcome.has_value()) {
         std::cerr << "The captures could not be solved. Nothing was written.\n";
         return 1;

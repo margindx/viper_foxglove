@@ -186,26 +186,46 @@ This is a **bench procedure**, run at the machine the Viper is attached to. Unli
 **not** require an existing `probe_profiles` entry for the connected sensor count — producing that entry is
 the point, so a probe can be calibrated for the first time. It writes to the same config file it read.
 
-You need a flat surface, and a probe whose housing has a second flat face (not the imaging face) that can
-rest on it. There are three captures, and the program will not let you leave one until the data can actually
-support a solve — it shows live what is still missing. Nothing is sampled until you have read the step and
-pressed Enter, so you can get the probe into position first.
+You need a flat surface, and a probe whose housing has a flat along its body that it can rest on. There are
+two captures, and the program will not let you leave one until the data can actually support a solve — it
+shows live what is still missing. Nothing is sampled until you have read the step and pressed Enter, so you
+can get the probe into position first.
+
+```
+STEP 1 — tip pivot                    STEP 2 — body flat
+                                      (viewed from above)
+   \      |      /
+    \     |     /                        ,------------------.
+     \    |    /     probe body          | S            lens|
+      \   |   /      sensor to lens      `------------------'
+       \  |  /
+        \ | /                            lay the flattened side down,
+   ------o------  surface                 then rotate it on the surface
+        tip stays on one spot             and re-place at many angles
+```
 
 1. **Tip pivot.** Rest the tip on the surface, hold that spot, and rock the probe through as wide a range of
    angles as you can without letting the tip slide. Vary the *direction* of tilt, not just how far: a sweep
-   confined to one plane is ill-conditioned however long you run it. This solves the tip offset.
-2. **Flat placements.** Lay the imaging face flat on the surface, lift, rotate about the probe's own axis,
-   and set it down flat again. Repeat at many rotations. Keep the face flat — do not tilt. This solves the
-   face normal.
-3. **Second flat.** The same action as step 2, on a different face: lay a flat of the *housing* — any flat
-   that is not the imaging face — against the surface, lift, rotate about that face's normal, and set it
-   down again. Use the same flat throughout. This solves that flat's normal, which together with the imaging
-   face normal gives the full tip rotation.
+   confined to one plane is ill-conditioned however long you run it.
+
+   This solves the tip offset. It also gives the probe axis for free — the probe is straight and the tip lies
+   on its axis, so the sensor-to-tip vector *is* that axis. Nothing needs to be captured for it, which is why
+   there is no step that stands the probe on its lens.
+
+2. **Body flat.** Lay the probe down on a flat of its housing — the flattened side of the body, not the lens
+   end — so it rests stably. Then rotate it on the surface like turning a clock hand, and re-place it at many
+   different angles. Keep the same flat in contact throughout.
+
+   This solves the one further direction needed to fix roll about the probe axis. A long flat resting on a
+   surface is a far more stable angular reference than balancing the probe on its end.
 
    Because the recovered direction is the housing flat's normal rather than the footprint's long axis, the
    program then asks for the angle between the two, measured about the probe axis. That is a property of the
    probe's design and comes from CAD, not from the capture — commonly `0` or `90` degrees. It affects only
    roll; the tip position is already fixed by step 1.
+
+Do both steps on the **same surface**: step 2's recovered world direction is used as the surface normal for
+the independent check on step 1.
 
 The result is printed with its residuals before anything is written, and you are asked to confirm. The
 rotation is confirmed separately, so you can accept a new offset while leaving the orientation alone. The
@@ -214,25 +234,19 @@ interrupted write cannot leave a truncated file that the next normal run would r
 
 ##### Reading the residuals
 
-The tip is a 10 × 1 mm **face**, not a point, and the calibration solves for its centre. As the probe tilts
-during the pivot the contact point migrates across that face, which biases the answer. The bias is
-anisotropic — up to about ±5 mm along the footprint but only ±0.5 mm across it — so residuals are reported
-**per axis in the probe frame** rather than as one number:
+The per-axis residual is expressed in the **sensor's own body axes**, not the probe's. The two coincide only
+when the tip rotation is identity, so on a probe whose sensor is not mounted squarely an error that is
+strongly directional in the probe frame is spread evenly across all three components. The program says so
+when it detects that case; an even spread there is expected rather than suspicious.
 
-```
-Residual per axis     [0.31, 2.85, 0.44] mm  (probe frame: x along probe, y along the footprint long axis)
-```
+The overall RMS is the number to judge the capture by. A second, independent estimate is computed by applying
+a plane constraint to the same rocking samples, using the surface normal from step 2. It has a *different*
+error model, so agreement between the two is evidence — and a disagreement above 5 mm is reported together
+with both condition numbers, since the plane check is the weaker solve and fails first.
 
-A large `y` relative to `x` and `z` is the expected signature of contact migration. If the **across**-footprint
-residual is the larger one, something other than migration is wrong and the number should not be trusted.
-
-A second, independent estimate is computed by applying a plane constraint to the same rocking data, using the
-surface normal from step 2. It has a *different* error model, so agreement between the two is evidence and a
-disagreement above 5 mm is flagged as a warning.
-
-Note what calibration cannot do: the flat placements determine orientation only. With the face flat every
-time, the offset along the face normal is perfectly confounded with the unknown position of the surface, so
-those placements carry no information about the translation at all.
+Note what calibration cannot do: step 2 determines orientation only. With the flat down every time, the
+offset along its normal is perfectly confounded with the unknown position of the surface, so those placements
+carry no information about the translation at all.
 
 #### How the sensors are fused
 
