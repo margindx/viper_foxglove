@@ -226,11 +226,43 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
                   << "\n";
         std::cout << "    Disagreement        " << std::fixed << std::setprecision(2)
                   << outcome.offsetDisagreementM * 1000.0 << " mm\n";
+        std::cout << "    Residual            " << std::fixed << std::setprecision(2)
+                  << outcome.planeCheck->residualRms * 1000.0 << " mm\n";
+        std::cout << "    Condition           " << std::fixed << std::setprecision(1)
+                  << outcome.planeCheck->conditionNumber << " (pivot: "
+                  << outcome.pivot.conditionNumber << ")\n";
 
         if (outcome.offsetDisagreementM > 0.005) {
-            std::cout << "    WARNING: the two estimates differ by more than 5 mm. They have "
-                         "different\n             error models, so a large gap means at least one "
-                         "is being strained.\n";
+            // Which estimate to distrust is decided by the conditioning, not by
+            // the size of the gap. The plane check is the weaker of the two --
+            // one equation per sample instead of three, and a normal borrowed
+            // from a different capture -- so it fails first and fails quietly.
+            const bool checkIllConditioned = outcome.planeCheck->conditionNumber > 100.0;
+            const bool pivotIllConditioned = outcome.pivot.conditionNumber > 100.0;
+
+            std::cout << "    WARNING: the two estimates differ by more than 5 mm.\n";
+
+            if (checkIllConditioned && !pivotIllConditioned) {
+                std::cout << "             The check itself is ill-conditioned, so the gap says "
+                             "little about\n             the pivot. Disregard this check and judge "
+                             "the offset by the pivot's\n             own residual and condition "
+                             "above.\n";
+            } else if (pivotIllConditioned) {
+                std::cout << "             The pivot is ill-conditioned too. Recapture step 1 with "
+                             "a wider and\n             more varied sweep before trusting either "
+                             "number.\n";
+            } else {
+                std::cout << "             Both solves are well conditioned, so this is a real "
+                             "physical\n             inconsistency rather than numerical noise. "
+                             "The usual causes are the\n             surface used for step 1 not "
+                             "being parallel to the one used for step 2,\n             or the tip "
+                             "not actually resting on the surface throughout step 1.\n";
+            }
+
+            std::cout << "             The plane normal comes from step 2, whose fit was "
+                      << std::setprecision(3) << outcome.faceNormal.residualDeg
+                      << " deg RMS at separation " << outcome.faceNormal.separation
+                      << ";\n             a poor figure there invalidates this check on its own.\n";
         }
     } else {
         std::cout << "\n  Independent plane-constraint check unavailable for this capture.\n";
