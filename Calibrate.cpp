@@ -209,16 +209,28 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
     std::cout << "  Pivot residual (RMS)  " << std::fixed << std::setprecision(2)
               << outcome.pivot.residualRms * 1000.0 << " mm\n";
     std::cout << "  Residual per axis     " << formatMillimetres(outcome.pivot.residualRmsProbeFrame)
-              << "  (probe frame: x along probe, y along the footprint long axis)\n";
+              << "  (sensor body axes)\n";
     std::cout << "  Samples / condition   " << outcome.pivot.sampleCount << " / " << std::fixed
               << std::setprecision(1) << outcome.pivot.conditionNumber << "\n";
 
-    // The footprint is 10 mm along y and 1 mm along z, so contact migration
-    // should show up mostly on y. Anything else means a different problem.
+    // Those are the sensor's own axes, not the probe's. They coincide only when
+    // the tip rotation is identity; with a rotated mount an error that is
+    // strongly anisotropic in the probe frame is spread across all three
+    // components here, so the split cannot be read as along- versus
+    // across-footprint. Say so rather than let it be misread.
     const auto &r = outcome.pivot.residualRmsProbeFrame;
-    if (r.y() > 0.0 && r.z() > r.y())
+    const bool tipFrameKnown =
+            outcome.tipRotation.has_value() && outcome.rotationFromIdentityDeg < 5.0;
+
+    if (!tipFrameKnown) {
+        std::cout << "  NOTE: the per-axis split is in the sensor's own axes. The sensor is not "
+                     "mounted\n        squarely to the probe, so these do not correspond to along- "
+                     "and across-footprint\n        and an even spread across the three is "
+                     "expected rather than suspicious.\n";
+    } else if (r.y() > 0.0 && r.z() > r.y()) {
         std::cout << "  NOTE: the across-footprint residual exceeds the along-footprint one, "
                      "which contact migration alone does not explain.\n";
+    }
 
     if (outcome.planeCheck.has_value()) {
         std::cout << "\n  Independent check (plane constraint):\n";

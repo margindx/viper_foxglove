@@ -66,6 +66,18 @@ protected:
     /// they are checked on the first one rather than at construction.
     bool unitsChecked_ = false;
 
+    /// Likewise the SEU's own tip offset, which is per-sensor and so can only
+    /// be interrogated once the sensor count is known.
+    bool deviceTipOffsetsChecked_ = false;
+
+    /// Ask the SEU what tip offset it is applying to one sensor. Returns nullopt
+    /// when the device did not answer in a form we can read, which is treated as
+    /// "unknown" rather than "zero".
+    std::optional<Eigen::Vector3d> queryDeviceTipOffset(uint32_t sensorIndex);
+
+    /// Refuse to run if the SEU is already displacing positions to a tip.
+    void checkDeviceTipOffsets(uint32_t nSensors);
+
     /// Calibration runs before a probe has a profile, so the usual "no profile"
     /// complaint is expected there rather than a fault.
     bool calibrationMode_ = false;

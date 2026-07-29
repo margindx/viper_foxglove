@@ -123,6 +123,94 @@ void Viper::startContinuousRead() {
     continuousPublishThread_ = std::thread{&Viper::publishContinuous, this};
 }
 
+std::optional<Eigen::Vector3d> Viper::queryDeviceTipOffset(uint32_t sensorIndex) {
+    // preamble + size + SEUCMD(20) + TIP_OFFSET_CONFIG(12) + CRC
+    constexpr uint32_t kCmdSize = 32;
+    constexpr uint32_t kRespSize = 64;
+    constexpr uint32_t kPayloadOffset = 28;
+
+    uint8_t cmdPkg[kCmdSize];
+    uint8_t respPkg[kRespSize];
+
+    memset(cmdPkg, 0, kCmdSize);
+    auto *phdr = (SEUCMD_HDR *) cmdPkg;
+    phdr->preamble = VIPER_CMD_PREAMBLE;
+    phdr->size = 24;
+    phdr->seucmd.cmd = CMD_TIP_OFFSET;
+    phdr->seucmd.action = CMD_ACTION_GET;
+    phdr->seucmd.arg1 = sensorIndex;   // the command is scoped per sensor
+
+    const uint32_t cmdCrc = calculateCrc16(cmdPkg, 28);
+    memcpy(cmdPkg + 28, &cmdCrc, CRC_SIZE);
+
+    viperUsb.usb_send_cmd(cmdPkg, kCmdSize);
+    std::this_thread::sleep_for(std::chrono::milliseconds(CMD_DELAY));
+
+    const uint32_t br = cmdQueue_.wait_and_pop(respPkg, kRespSize);
+
+    // Anything unexpected is reported as unknown, never as zero: claiming the
+    // device applies no offset when we could not read it would defeat the check.
+    if (br < kPayloadOffset + sizeof(TIP_OFFSET_CONFIG) + CRC_SIZE)
+        return std::nullopt;
+
+    if (*(uint32_t *) respPkg != VIPER_CMD_PREAMBLE)
+        return std::nullopt;
+
+    if (!validateCrc(calculateCrc16(respPkg, br - 4), respPkg, br - 4))
+        return std::nullopt;
+
+    if (!checkAck(respPkg))
+        return std::nullopt;
+
+    const auto *offset = (const TIP_OFFSET_CONFIG *) (respPkg + kPayloadOffset);
+
+    return Eigen::Vector3d{offset->params[0], offset->params[1], offset->params[2]};
+}
+
+void Viper::checkDeviceTipOffsets(uint32_t nSensors) {
+    // The SEU can apply its own per-sensor tip offset: "all future PNO will
+    // rotate this vector into the sensor's frame of reference and add it to the
+    // sensor's position" -- which is exactly what applyTipTransform does. A
+    // non-zero offset here means the device has already moved the reported
+    // position to a tip and probe_profiles would displace it a second time. The
+    // setting is persistent on the device, so it outlives whoever set it.
+    std::vector<std::string> unreadable;
+
+    for (uint32_t sensor = 0; sensor < nSensors; sensor++) {
+        const auto offset = queryDeviceTipOffset(sensor);
+
+        if (!offset.has_value()) {
+            unreadable.push_back(std::to_string(sensor));
+            continue;
+        }
+
+        if (offset->norm() > 1e-9) {
+            std::stringstream ss;
+            ss << "The Viper is already applying a tip offset of [" << offset->x() << ", "
+               << offset->y() << ", " << offset->z() << "] to sensor " << sensor
+               << ". Positions it reports are therefore already displaced to a tip, and the "
+                  "probe_profiles offset would be added on top of it, placing the tip roughly "
+                  "twice as far out and along neither vector. Clear it on the device "
+                  "(CMD_TIP_OFFSET reset) so the SEU reports the sensor position, and let "
+                  "probe_profiles own the offset.";
+            raiseFatalError(ss.str());
+            return;
+        }
+    }
+
+    if (!unreadable.empty()) {
+        // Not fatal: failing to read the setting is not evidence that it is set,
+        // and refusing to run on a silent device would be worse than saying so.
+        std::stringstream ss;
+        ss << "Could not read the Viper's own tip offset for sensor(s)";
+        for (const auto &sensor : unreadable)
+            ss << " " << sensor;
+        ss << ". If the device has one configured, the published tip will be displaced twice. "
+              "Check it with the Polhemus configuration utility.";
+        fgInterface_->logWarning(ss.str());
+    }
+}
+
 uint32_t Viper::calculateCrc16(uint8_t *b, uint32_t len) {
     uint32_t crc = 0;
     while (len--)
@@ -201,6 +289,15 @@ void Viper::publishContinuous() {
 
             fgInterface_->logInfo("Viper reporting " + mdx::describe(units));
             std::cout << "Viper reporting " << mdx::describe(units) << std::endl;
+        }
+
+        // Per-sensor, so it needs the count the first frame just gave us.
+        if (!deviceTipOffsetsChecked_ && nSensors > 0) {
+            deviceTipOffsetsChecked_ = true;
+            checkDeviceTipOffsets(nSensors);
+
+            if (fatalError_)
+                break;
         }
 
         pnoToFoxgloveSceneUpdate(pfd, nSensors);
