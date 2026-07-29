@@ -5,6 +5,12 @@
 #ifndef VIPER_MESHRECONSTRUCTION_HPP
 #define VIPER_MESHRECONSTRUCTION_HPP
 
+// The entire mesh reconstruction API depends on Open3D. When the project is
+// built without Open3D (MDX_WITH_OPEN3D undefined), this header exposes no
+// declarations and callers must guard use of these functions with the same
+// macro. See CMakeLists.txt for how MDX_WITH_OPEN3D is set.
+#ifdef MDX_WITH_OPEN3D
+
 #include <open3d/Open3D.h>
 #include "open3d/t/geometry/RaycastingScene.h"
 #include "open3d/t/geometry/TriangleMesh.h"
@@ -126,5 +132,6 @@ namespace mdx::geometry {
             std::optional<open3d::core::Device> device = std::nullopt);
 }
 
+#endif // MDX_WITH_OPEN3D
 
 #endif //VIPER_MESHRECONSTRUCTION_HPP

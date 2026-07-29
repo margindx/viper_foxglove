@@ -142,41 +142,68 @@ void Viper::publishContinuous() {
 
     SENFRAMEDATA *pfd;
 
+    // Frames that never reach the publish path. Dropping them is correct -- the
+    // payload cannot be trusted -- but doing it silently made a stream that
+    // publishes nothing indistinguishable from a device that was never sending,
+    // with no diagnostic anywhere to tell the two apart.
+    uint64_t sizeMismatchedFrames = 0;
+    uint64_t crcFailedFrames = 0;
 
     while (isContinuous && !fatalError_) {
         br = pnoQueue_.wait_and_pop(respPkg, respSize);
 
-        if (br && (br == (*(uint32_t*)(respPkg+4)+8))) {
-            crc = calculateCrc16(respPkg, br-4);
+        if (!br)
+            continue;   // nothing arrived within the queue's wait
 
-            if (validateCrc(crc, respPkg, br-4)) {
-	        nSensors = *(uint32_t*)(respPkg + 20);
-                static bool printed = false; if (!printed) { std::cout << "Using " << nSensors << " position sensors" << std::endl; printed = true; }
-	    	pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
-                frame = *(uint32_t*)(respPkg + 12);
-
-                // The device's unit settings are persistent and only observable
-                // from a frame, so this is the earliest point they can be
-                // checked. Everything downstream assumes metres and quaternions;
-                // anything else would be silently misinterpreted rather than
-                // failing visibly.
-                if (!unitsChecked_ && nSensors > 0) {
-                    unitsChecked_ = true;
-                    const auto units = mdx::decodeFrameUnits(pfd->SFinfo.bfPosUnits,
-                                                             pfd->SFinfo.bfOriUnits);
-
-                    if (!units.isSupported()) {
-                        raiseFatalError(mdx::unsupportedUnitsMessage(units));
-                        break;
-                    }
-
-                    fgInterface_->logInfo("Viper reporting " + mdx::describe(units));
-                    std::cout << "Viper reporting " << mdx::describe(units) << std::endl;
-                }
-
-                pnoToFoxgloveSceneUpdate(pfd, nSensors);
+        const uint32_t declaredSize = *(uint32_t*)(respPkg + 4) + 8;
+        if (br != declaredSize) {
+            if ((++sizeMismatchedFrames % 100) == 1) {
+                std::stringstream ss;
+                ss << "Dropped a PNO frame whose length disagrees with its header ("
+                   << sizeMismatchedFrames << " frame(s) so far): received " << br
+                   << " bytes, header declares " << declaredSize;
+                fgInterface_->logWarning(ss.str());
             }
+            continue;
         }
+
+        crc = calculateCrc16(respPkg, br-4);
+
+        if (!validateCrc(crc, respPkg, br-4)) {
+            if ((++crcFailedFrames % 100) == 1) {
+                std::stringstream ss;
+                ss << "Dropped a PNO frame that failed its CRC (" << crcFailedFrames
+                   << " frame(s) so far): computed " << crc << ", frame carries "
+                   << *(uint32_t*)(respPkg + br - 4);
+                fgInterface_->logWarning(ss.str());
+            }
+            continue;
+        }
+
+        nSensors = *(uint32_t*)(respPkg + 20);
+        static bool printed = false; if (!printed) { std::cout << "Using " << nSensors << " position sensors" << std::endl; printed = true; }
+        pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
+        frame = *(uint32_t*)(respPkg + 12);
+
+        // The device's unit settings are persistent and only observable from a
+        // frame, so this is the earliest point they can be checked. Everything
+        // downstream assumes metres and quaternions; anything else would be
+        // silently misinterpreted rather than failing visibly.
+        if (!unitsChecked_ && nSensors > 0) {
+            unitsChecked_ = true;
+            const auto units = mdx::decodeFrameUnits(pfd->SFinfo.bfPosUnits,
+                                                     pfd->SFinfo.bfOriUnits);
+
+            if (!units.isSupported()) {
+                raiseFatalError(mdx::unsupportedUnitsMessage(units));
+                break;
+            }
+
+            fgInterface_->logInfo("Viper reporting " + mdx::describe(units));
+            std::cout << "Viper reporting " << mdx::describe(units) << std::endl;
+        }
+
+        pnoToFoxgloveSceneUpdate(pfd, nSensors);
     }
 
     br = pnoQueue_.wait_and_pop(respPkg, respSize);
@@ -499,8 +526,8 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
             pfd->pno.pos[2]
         };
 
-        // Log point to line for sensor 0
-        if (i == 0) {
+        // Log point to line for sensor 0 (skip when downstream generates geometry)
+        if (i == 0 && fgInterface_->generateGeometry()) {
             auto point = foxglove::schemas::Point3{
                 pos.x,
                 pos.y,
