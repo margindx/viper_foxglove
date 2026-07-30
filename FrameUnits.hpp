@@ -8,7 +8,7 @@
 // assumes. Nothing here sends CMD_UNITS, so the only safe move is to read what
 // the device reports and refuse to run on anything we would misinterpret:
 //
-//   * positions are treated as metres throughout (probe_profiles tip_offset_m,
+//   * positions are treated as meters throughout (probe_profiles tip_offset_m,
 //     the Foxglove frames, the point clouds). A device left on inches would
 //     rescale everything by 39.37 with no visible symptom.
 //   * orientations are read as a quaternion (w, x, y, z). In either Euler mode
@@ -37,7 +37,7 @@ struct FrameUnits {
     PositionUnits position{PositionUnits::Unknown};
     OrientationUnits orientation{OrientationUnits::Unknown};
 
-    /// True only for the combination this program can interpret: metres and
+    /// True only for the combination this program can interpret: meters and
     /// quaternions.
     bool isSupported() const;
 };
@@ -49,7 +49,7 @@ FrameUnits decodeFrameUnits(std::uint32_t positionBits, std::uint32_t orientatio
 std::string describe(PositionUnits units);
 std::string describe(OrientationUnits units);
 
-/// Human-readable summary, e.g. "metres, quaternion".
+/// Human-readable summary, e.g. "meters, quaternion".
 std::string describe(const FrameUnits &units);
 
 /// Actionable message naming what was reported, what is required, and how to

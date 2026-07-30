@@ -63,7 +63,7 @@ struct CalibrationOutcome {
     /// Independent offset estimate from the plane constraint applied to the
     /// rocking samples. Absent when that system was too poorly conditioned.
     std::optional<PlaneTranslationResult> planeCheck;
-    /// Distance between the pivot and plane-constraint offsets, metres. Large
+    /// Distance between the pivot and plane-constraint offsets, meters. Large
     /// values mean the two error models disagree and neither should be trusted
     /// without investigation.
     double offsetDisagreementM{0.0};

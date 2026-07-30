@@ -90,7 +90,7 @@ The program does **not** search for or resolve any alternate config file. It che
 **A config file is required.** If that file does not exist, cannot be parsed, or does not contain a valid
 `probe_profiles` block, the program prints an error and exits with status 1 rather than starting. This is
 deliberate: `probe_profiles` carries the probe tip offset, and running with the wrong offset misplaces the
-tip by centimetres without any visible symptom, so there is no default to fall back on.
+tip by centimeters without any visible symptom, so there is no default to fall back on.
 
 Every other key is still parsed field-by-field: any key apart from `probe_profiles` that is omitted falls back
 to its built-in default.
@@ -111,10 +111,10 @@ to its built-in default.
 
 ### Required Viper device settings
 
-The SEU must be configured to report **metres** and **quaternions**. These are persistent device settings,
+The SEU must be configured to report **meters** and **quaternions**. These are persistent device settings,
 and both Polhemus factory defaults (inches, Euler degrees) are wrong for this program:
 
-- Positions are treated as metres everywhere — `tip_offset_m`, the published frames, the point clouds. A
+- Positions are treated as meters everywhere — `tip_offset_m`, the published frames, the point clouds. A
   device left on inches would rescale all of it by 39.37.
 - Orientations are read as `(w, x, y, z)`. In either Euler mode the fourth value is unused and the first
   three are azimuth/elevation/roll, so the same four floats become a meaningless rotation.
@@ -185,7 +185,7 @@ sensors to the Viper SEU. `probe_profiles` maps one to the other:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `sensor_count` | int ≥ 1 | yes | Number of connected EM sensors this profile applies to. Each count may appear at most once. |
-| `tip_offset_m` | `[x, y, z]` | yes | Offset in **metres** from the fused sensor origin to the probe tip, in the sensor frame. `x` is the along-probe direction; `y`/`z` are offsets to the probe centre and are normally `0`. |
+| `tip_offset_m` | `[x, y, z]` | yes | Offset in **meters** from the fused sensor origin to the probe tip, in the sensor frame. `x` is the along-probe direction; `y`/`z` are offsets to the probe centre and are normally `0`. |
 | `tip_rotation_zyx_deg` | `[az, el, roll]` | no | Rotation from the sensor frame to the tip frame, in degrees, using the Viper's own Z-Y-X (azimuth / elevation / roll) convention. Omit for identity. |
 | `label` | string | no | Name echoed to the log when the profile is selected. |
 

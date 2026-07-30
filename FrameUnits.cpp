@@ -37,8 +37,8 @@ std::string describe(PositionUnits units) {
     switch (units) {
         case PositionUnits::Inch: return "inches";
         case PositionUnits::Foot: return "feet";
-        case PositionUnits::Centimeter: return "centimetres";
-        case PositionUnits::Meter: return "metres";
+        case PositionUnits::Centimeter: return "centimeters";
+        case PositionUnits::Meter: return "meters";
         case PositionUnits::Unknown: break;
     }
 
@@ -62,10 +62,10 @@ std::string describe(const FrameUnits &units) {
 
 std::string unsupportedUnitsMessage(const FrameUnits &units) {
     std::string message = "Viper is reporting " + describe(units) +
-                          "; this program requires metres and quaternion.";
+                          "; this program requires meters and quaternion.";
 
     if (units.position != PositionUnits::Meter) {
-        message += " Position units other than metres would rescale every "
+        message += " Position units other than meters would rescale every "
                    "published position and the configured tip offset.";
     }
 
@@ -75,7 +75,7 @@ std::string unsupportedUnitsMessage(const FrameUnits &units) {
                    "misread as a quaternion.";
     }
 
-    message += " These are persistent device settings: set the SEU to metres and "
+    message += " These are persistent device settings: set the SEU to meters and "
                "quaternion output (CMD_UNITS) and restart.";
 
     return message;

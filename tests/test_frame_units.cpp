@@ -33,7 +33,7 @@ TEST_CASE("values outside the enums are not guessed at", "[units]") {
     REQUIRE_FALSE(decodeFrameUnits(4, 2).isSupported());
 }
 
-TEST_CASE("only metres plus quaternion is supported", "[units]") {
+TEST_CASE("only meters plus quaternion is supported", "[units]") {
     SECTION("the one good combination") {
         REQUIRE(decodeFrameUnits(3, 2).isSupported());
     }
@@ -77,13 +77,13 @@ TEST_CASE("the failure message names the actual problem", "[units]") {
     SECTION("only the position is wrong") {
         const auto message = unsupportedUnitsMessage(decodeFrameUnits(2, 2));
 
-        REQUIRE(message.find("centimetres") != std::string::npos);
+        REQUIRE(message.find("centimeters") != std::string::npos);
         REQUIRE(message.find("rescale") != std::string::npos);
         REQUIRE(message.find("misread as a quaternion") == std::string::npos);
     }
 }
 
 TEST_CASE("describe is human-readable", "[units]") {
-    REQUIRE(describe(decodeFrameUnits(3, 2)) == "metres, quaternion");
+    REQUIRE(describe(decodeFrameUnits(3, 2)) == "meters, quaternion");
     REQUIRE(describe(decodeFrameUnits(0, 0)) == "inches, Euler degrees");
 }

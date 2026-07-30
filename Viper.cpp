@@ -452,7 +452,7 @@ void Viper::publishContinuous() {
 
         // The device's unit settings are persistent and only observable from a
         // frame, so this is the earliest point they can be checked. Everything
-        // downstream assumes metres and quaternions; anything else would be
+        // downstream assumes meters and quaternions; anything else would be
         // silently misinterpreted rather than failing visibly.
         if (!unitsChecked_ && nSensors > 0) {
             unitsChecked_ = true;

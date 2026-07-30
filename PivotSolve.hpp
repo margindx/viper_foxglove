@@ -50,7 +50,7 @@
 
 namespace mdx {
 
-/// One captured fused-sensor pose. Positions are metres (see FrameUnits).
+/// One captured fused-sensor pose. Positions are meters (see FrameUnits).
 using CalibrationSample = Pose;
 
 /// Thresholds deciding when a capture is good enough to solve from. Defaults
@@ -116,11 +116,11 @@ struct PivotResult {
     Eigen::Vector3d tipOffset{Eigen::Vector3d::Zero()};
     /// The stationary point the tip was held at, in tracker coordinates.
     Eigen::Vector3d pivotPoint{Eigen::Vector3d::Zero()};
-    /// Per-axis RMS residual expressed in the probe frame, metres. The
+    /// Per-axis RMS residual expressed in the probe frame, meters. The
     /// footprint long axis should dominate; a large short-axis value means
     /// something other than contact migration is wrong.
     Eigen::Vector3d residualRmsProbeFrame{Eigen::Vector3d::Zero()};
-    /// Overall RMS residual, metres.
+    /// Overall RMS residual, meters.
     double residualRms{0.0};
     double conditionNumber{0.0};
     std::size_t sampleCount{0};
@@ -150,9 +150,9 @@ std::optional<DirectionResult> solveCommonDirection(const std::vector<Calibratio
 /// tip offset, independent of the point pivot.
 struct PlaneTranslationResult {
     Eigen::Vector3d tipOffset{Eigen::Vector3d::Zero()};
-    /// Signed distance from the tracker origin to the surface, metres.
+    /// Signed distance from the tracker origin to the surface, meters.
     double planeOffset{0.0};
-    /// RMS distance of the solved tip from the surface, metres.
+    /// RMS distance of the solved tip from the surface, meters.
     double residualRms{0.0};
     double conditionNumber{0.0};
     std::size_t sampleCount{0};

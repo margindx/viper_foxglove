@@ -161,7 +161,7 @@ std::string distortionMessage(std::uint32_t level, int sensor, std::uint64_t fra
     ss << "Viper reports EM distortion of " << level << "/255 on sensor " << sensor << " ("
        << framesAffected << " frame(s) above " << kDistortionWarnLevel
        << " so far). Positions and orientations are degraded while this persists -- move away "
-          "from metal, motors and displays, or expect centimetre-scale error.";
+          "from metal, motors and displays, or expect centimeter-scale error.";
 
     return ss.str();
 }
