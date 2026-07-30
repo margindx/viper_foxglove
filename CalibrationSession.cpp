@@ -31,10 +31,21 @@ bool isUsable(const Pose &pose) {
 StepInfo describeStep(CalibrationStep step) {
     switch (step) {
         case CalibrationStep::RockingPivot:
-            return {step, "1 of 2: tip pivot",
-                    "Rest the probe tip on a flat surface and hold that spot. Rock and rotate "
-                    "the probe through as wide a range of angles as you can without letting the "
-                    "tip slide. Vary the direction you tilt in, not just how far.\n"
+            return {step, "1 of 2: lens pivot",
+                    "Rest the probe's lens on a flat surface and keep it on that one spot "
+                    "throughout. The lens must not slide.\n"
+                    "\n"
+                    "The lens is a narrow rectangle, so rock it on a definite edge rather than "
+                    "sweeping it around freely -- that keeps the contact predictable:\n"
+                    "\n"
+                    "  1. Rock back and forth over the long (10 mm) edge, tilting at least\n"
+                    "     20 degrees each way.\n"
+                    "  2. Turn the probe to a new heading, keeping the lens on the same spot,\n"
+                    "     and rock over the long edge again. Repeat at several headings.\n"
+                    "  3. If the prompt still asks for more spread, rock carefully over the\n"
+                    "     short (1 mm) edge too.\n"
+                    "\n"
+                    "Use this same surface for step 2.\n"
                     "\n"
                     "       \\      |      /\n"
                     "        \\     |     /\n"
@@ -43,22 +54,30 @@ StepInfo describeStep(CalibrationStep step) {
                     "           \\  |  /\n"
                     "            \\ | /\n"
                     "       ------o------  surface\n"
-                    "            tip stays on one spot"};
+                    "        lens stays on one spot"};
 
         case CalibrationStep::BodyFlat:
-            return {step, "2 of 2: body flat",
-                    "Lay the probe down on a flat of its housing -- the flattened side of the "
-                    "body, not the lens end -- so it rests stably on the surface. Then rotate it "
-                    "on the surface, like turning a clock hand, and re-place it at many different "
-                    "angles. Keep the same flat in contact throughout and keep it flat.\n"
+            return {step, "2 of 2: body side",
+                    "The probe body is oval in cross-section, with two opposite sides flatter "
+                    "than the rest. Lay the probe down so one of those flatter sides rests on "
+                    "the surface, and let it settle.\n"
+                    "\n"
+                    "Keeping that side on the surface the whole time, turn the probe slowly "
+                    "through a full circle, as though sweeping a clock hand around. Do not lift "
+                    "it, and take care not to let it rock -- the section is oval, so uneven "
+                    "pressure will tilt it, and any tilt goes straight into the answer.\n"
+                    "\n"
+                    "Everything is recorded while you do this, so anything captured with the "
+                    "side off the surface pulls the answer off.\n"
+                    "\n"
+                    "Use the same surface as step 1.\n"
                     "\n"
                     "       viewed from above:\n"
                     "\n"
                     "         ,------------------.\n"
-                    "         | S            lens|      rotate on the surface\n"
-                    "         `------------------'      and re-place  (clock hand)\n"
-                    "\n"
-                    "       use the same surface as step 1"};
+                    "         | S            lens|      turn slowly through a full\n"
+                    "         `------------------'      circle, keeping the same\n"
+                    "                                   side down throughout"};
 
         case CalibrationStep::Done:
             return {step, "Complete", "All captures gathered."};

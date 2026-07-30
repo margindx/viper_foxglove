@@ -285,7 +285,7 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
         std::cout << "\n  Tip rotation (Z-Y-X)  " << formatDegrees(zyx) << "\n";
         std::cout << "    From identity       " << std::fixed << std::setprecision(3)
                   << outcome.rotationFromIdentityDeg << " deg\n";
-        std::cout << "    Body flat fit       " << std::setprecision(3)
+        std::cout << "    Body side fit       " << std::setprecision(3)
                   << outcome.bodyFlat.residualDeg << " deg RMS, separation "
                   << outcome.bodyFlat.separation << "\n";
 
@@ -312,8 +312,8 @@ int runCalibration(const std::string &configPath) {
         return 1;
     }
 
-    std::cout << "You will need a flat surface, and a probe whose housing has a flat along its\n"
-                 "body that it can rest on.\n";
+    std::cout << "You will need a flat surface. The probe rests on one of the flatter sides\n"
+                 "of its body for the second step.\n";
 
     // Held by optional so a failure to start (an unwritable directory, a stale
     // recording still held open) reports and exits rather than escaping as an
@@ -391,12 +391,12 @@ int runCalibration(const std::string &configPath) {
     // already fixed by step 1.
     double bodyFlatRollDeg = 0.0;
     {
-        std::cout << "\nStep 2 measured the body flat's normal. To turn that into the\n"
+        std::cout << "\nStep 2 measured that side's normal. To turn that into the\n"
                      "footprint's orientation I need the angle between them, about the probe\n"
                      "axis, from the probe's design. Often 0 or 90.\n";
 
         std::string answer;
-        if (!prompt("Angle from the body flat's normal to the footprint long axis, in degrees "
+        if (!prompt("Angle from that side's normal to the footprint long axis, in degrees "
                     "[0]: ",
                     answer)) {
             std::cout << "Aborted; nothing was written.\n";

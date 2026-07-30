@@ -224,13 +224,13 @@ This is a **bench procedure**, run at the machine the Viper is attached to. Unli
 **not** require an existing `probe_profiles` entry for the connected sensor count — producing that entry is
 the point, so a probe can be calibrated for the first time. It writes to the same config file it read.
 
-You need a flat surface, and a probe whose housing has a flat along its body that it can rest on. There are
+You need a flat surface. The probe rests on one of the flatter sides of its body for the second step. There are
 two captures, and the program will not let you leave one until the data can actually support a solve — it
 shows live what is still missing. Nothing is sampled until you have read the step and pressed Enter, so you
 can get the probe into position first.
 
 ```
-STEP 1 — tip pivot                    STEP 2 — body flat
+STEP 1 — lens pivot                   STEP 2 — body side
                                       (viewed from above)
    \      |      /
     \     |     /                        ,------------------.
@@ -239,28 +239,49 @@ STEP 1 — tip pivot                    STEP 2 — body flat
        \  |  /
         \ | /                            lay the flattened side down,
    ------o------  surface                 then rotate it on the surface
-        tip stays on one spot             and re-place at many angles
+        lens stays on one spot             and re-place at many angles
 ```
 
-1. **Tip pivot.** Rest the tip on the surface, hold that spot, and rock the probe through as wide a range of
-   angles as you can without letting the tip slide. Vary the *direction* of tilt, not just how far: a sweep
-   confined to one plane is ill-conditioned however long you run it.
+1. **Lens pivot.** Rest the probe's lens on the surface and keep it on that one spot throughout — it must not
+   slide.
 
-   This solves the tip offset. It also gives the probe axis for free — the probe is straight and the tip lies
-   on its axis, so the sensor-to-tip vector *is* that axis. Nothing needs to be captured for it, which is why
+   The lens is a narrow rectangle, so rock it on a definite edge rather than sweeping it around freely; that
+   keeps the contact predictable.
+
+   1. Rock back and forth over the long (10 mm) edge, tilting at least 20 degrees each way.
+   2. Turn the probe to a new heading, keeping the lens on the same spot, and rock over the long edge again.
+      Repeat at several headings.
+   3. If the prompt still asks for more spread, rock carefully over the short (1 mm) edge too.
+
+   Rocking on one edge only tilts in a single plane, and a sweep confined to one plane is ill-conditioned
+   however long you run it — hence the varied headings. The reason to prefer them over the short edge is
+   contact migration: the lens centre is the datum being solved for, and it sits 0.5 mm from the long edge but
+   5 mm from the short one, so rocking on the short edge displaces the datum ten times as far. Keep it in
+   reserve for when the varied headings alone do not satisfy the gate.
+
+   This solves the tip offset. It also gives the probe axis for free — the probe is straight and the lens lies
+   on its axis, so the sensor-to-lens vector *is* that axis. Nothing needs to be captured for it, which is why
    there is no step that stands the probe on its lens.
 
-2. **Body flat.** Lay the probe down on a flat of its housing — the flattened side of the body, not the lens
-   end — so it rests stably. Then rotate it on the surface like turning a clock hand, and re-place it at many
-   different angles. Keep the same flat in contact throughout.
+2. **Body side.** The probe body is oval in cross-section, with two opposite sides flatter than the rest. Lay
+   the probe down so one of those flatter sides rests on the surface, and let it settle. Then, keeping that
+   side on the surface the whole time, turn the probe slowly through a full circle, as though sweeping a clock
+   hand around.
 
-   This solves the one further direction needed to fix roll about the probe axis. A long flat resting on a
-   surface is a far more stable angular reference than balancing the probe on its end.
+   Two cautions, both of which corrupt the result rather than merely slowing it down:
 
-   Because the recovered direction is the housing flat's normal rather than the footprint's long axis, the
-   program then asks for the angle between the two, measured about the probe axis. That is a property of the
-   probe's design and comes from CAD, not from the capture — commonly `0` or `90` degrees. It affects only
-   roll; the tip position is already fixed by step 1.
+   - **Do not lift it.** Capture is continuous, so poses recorded mid-lift — with the side off the surface —
+     go into the solve alongside the good ones.
+   - **Do not let it rock.** The section is oval, so uneven pressure tilts it, and that tilt is precisely the
+     quantity being measured.
+
+   This solves the one further direction needed to fix roll about the probe axis, and a long line of contact
+   along the body is a far more stable angular reference than balancing the probe on its lens.
+
+   Because the recovered direction is that side's normal rather than the footprint's long axis, the program
+   then asks for the angle between the two, measured about the probe axis. That is a property of the probe's
+   design and comes from CAD, not from the capture — commonly `0` or `90` degrees. It affects only roll; the
+   tip position is already fixed by step 1.
 
 Do both steps on the **same surface**: step 2's recovered world direction is used as the surface normal for
 the independent check on step 1.
