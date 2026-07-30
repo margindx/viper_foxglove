@@ -16,6 +16,7 @@
 #include "SensorData.hpp"
 #include "ProbeProfile.hpp"
 #include "FrameUnits.hpp"
+#include "DeviceState.hpp"
 #include "FoxgloveInterface.hpp"
 
 #include "schema/foxglove/Time_generated.h"
@@ -70,13 +71,28 @@ protected:
     /// be interrogated once the sensor count is known.
     bool deviceTipOffsetsChecked_ = false;
 
-    /// Ask the SEU what tip offset it is applying to one sensor. Returns nullopt
-    /// when the device did not answer in a form we can read, which is treated as
-    /// "unknown" rather than "zero".
-    std::optional<Eigen::Vector3d> queryDeviceTipOffset(uint32_t sensorIndex);
+    /// Send a configuration GET and copy the payload out. False when the device
+    /// did not answer in a form we can read, which is treated as "unknown"
+    /// rather than as a default value.
+    bool queryConfig(uint32_t cmd, uint32_t arg1, void *payload, uint32_t payloadSize);
 
-    /// Refuse to run if the SEU is already displacing positions to a tip.
-    void checkDeviceTipOffsets(uint32_t nSensors);
+    /// Read the device's configuration once, before trusting any of its data.
+    /// Settings that silently transform the geometry stop the run; the rest are
+    /// logged so a recording carries the configuration it was made under.
+    void readDeviceState(uint32_t nSensors);
+
+    /// Per-frame checks on fields the SEU sends but we would otherwise discard.
+    void monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t frameCounter);
+
+    /// Frame-counter continuity, so dropped frames are visible rather than
+    /// showing up only as an unexplained rate.
+    bool haveFrameCounter_ = false;
+    uint32_t lastFrameCounter_ = 0;
+    uint64_t frameGapEvents_ = 0;
+    uint64_t framesDropped_ = 0;
+
+    /// Frames seen above the distortion warning level.
+    uint64_t distortedFrames_ = 0;
 
     /// Calibration runs before a probe has a profile, so the usual "no profile"
     /// complaint is expected there rather than a fault.

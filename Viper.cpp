@@ -4,6 +4,8 @@
 
 #include "Viper.hpp"
 
+#include <cstring>
+
 uint16_t Viper::crcTable_[256] =
 {
 0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
@@ -123,11 +125,10 @@ void Viper::startContinuousRead() {
     continuousPublishThread_ = std::thread{&Viper::publishContinuous, this};
 }
 
-std::optional<Eigen::Vector3d> Viper::queryDeviceTipOffset(uint32_t sensorIndex) {
-    // preamble + size + SEUCMD(20) + TIP_OFFSET_CONFIG(12) + CRC
+bool Viper::queryConfig(uint32_t cmd, uint32_t arg1, void *payload, uint32_t payloadSize) {
     constexpr uint32_t kCmdSize = 32;
-    constexpr uint32_t kRespSize = 64;
-    constexpr uint32_t kPayloadOffset = 28;
+    constexpr uint32_t kRespSize = 512;      // WHOAMI is the largest payload, at 192
+    constexpr uint32_t kPayloadOffset = 28;  // preamble + size + SEUCMD
 
     uint8_t cmdPkg[kCmdSize];
     uint8_t respPkg[kRespSize];
@@ -136,9 +137,9 @@ std::optional<Eigen::Vector3d> Viper::queryDeviceTipOffset(uint32_t sensorIndex)
     auto *phdr = (SEUCMD_HDR *) cmdPkg;
     phdr->preamble = VIPER_CMD_PREAMBLE;
     phdr->size = 24;
-    phdr->seucmd.cmd = CMD_TIP_OFFSET;
+    phdr->seucmd.cmd = cmd;
     phdr->seucmd.action = CMD_ACTION_GET;
-    phdr->seucmd.arg1 = sensorIndex;   // the command is scoped per sensor
+    phdr->seucmd.arg1 = arg1;
 
     const uint32_t cmdCrc = calculateCrc16(cmdPkg, 28);
     memcpy(cmdPkg + 28, &cmdCrc, CRC_SIZE);
@@ -148,66 +149,242 @@ std::optional<Eigen::Vector3d> Viper::queryDeviceTipOffset(uint32_t sensorIndex)
 
     const uint32_t br = cmdQueue_.wait_and_pop(respPkg, kRespSize);
 
-    // Anything unexpected is reported as unknown, never as zero: claiming the
-    // device applies no offset when we could not read it would defeat the check.
-    if (br < kPayloadOffset + sizeof(TIP_OFFSET_CONFIG) + CRC_SIZE)
-        return std::nullopt;
+    // Every failure path reports "unknown". Treating an unanswered query as a
+    // default value would defeat the point of asking.
+    if (br < kPayloadOffset + payloadSize + CRC_SIZE)
+        return false;
 
     if (*(uint32_t *) respPkg != VIPER_CMD_PREAMBLE)
-        return std::nullopt;
+        return false;
 
     if (!validateCrc(calculateCrc16(respPkg, br - 4), respPkg, br - 4))
-        return std::nullopt;
+        return false;
 
     if (!checkAck(respPkg))
-        return std::nullopt;
+        return false;
 
-    const auto *offset = (const TIP_OFFSET_CONFIG *) (respPkg + kPayloadOffset);
+    memcpy(payload, respPkg + kPayloadOffset, payloadSize);
 
-    return Eigen::Vector3d{offset->params[0], offset->params[1], offset->params[2]};
+    return true;
 }
 
-void Viper::checkDeviceTipOffsets(uint32_t nSensors) {
-    // The SEU can apply its own per-sensor tip offset: "all future PNO will
-    // rotate this vector into the sensor's frame of reference and add it to the
-    // sensor's position" -- which is exactly what applyTipTransform does. A
-    // non-zero offset here means the device has already moved the reported
-    // position to a tip and probe_profiles would displace it a second time. The
-    // setting is persistent on the device, so it outlives whoever set it.
+void Viper::readDeviceState(uint32_t nSensors) {
     std::vector<std::string> unreadable;
+    auto note = [&unreadable](const std::string &what) { unreadable.push_back(what); };
 
-    for (uint32_t sensor = 0; sensor < nSensors; sensor++) {
-        const auto offset = queryDeviceTipOffset(sensor);
+    fgInterface_->logInfo("--- Viper device configuration ---");
 
-        if (!offset.has_value()) {
-            unreadable.push_back(std::to_string(sensor));
-            continue;
-        }
+    // Identity, for the record: which box and which firmware produced this
+    // recording. Costs nothing and answers a question that is otherwise
+    // unanswerable after the fact.
+    {
+        WHOAMI_STRUCT whoami{};
+        if (queryConfig(CMD_WHOAMI, 0, &whoami, sizeof(whoami))) {
+            auto bounded = [](const char *field, size_t size) {
+                return std::string(field, ::strnlen(field, size));
+            };
 
-        if (offset->norm() > 1e-9) {
             std::stringstream ss;
-            ss << "The Viper is already applying a tip offset of [" << offset->x() << ", "
-               << offset->y() << ", " << offset->z() << "] to sensor " << sensor
-               << ". Positions it reports are therefore already displaced to a tip, and the "
-                  "probe_profiles offset would be added on top of it, placing the tip roughly "
-                  "twice as far out and along neither vector. Clear it on the device "
-                  "(CMD_TIP_OFFSET reset) so the SEU reports the sensor position, and let "
-                  "probe_profiles own the offset.";
-            raiseFatalError(ss.str());
-            return;
+            ss << "Device: " << bounded(whoami.device_name, NAME_SIZE)
+               << ", serial " << bounded(whoami.hw_ser_no, SERNUM_SIZE)
+               << ", firmware " << bounded(whoami.dsp_app_fw_pn, PN_SIZE);
+            fgInterface_->logInfo(ss.str());
+        } else {
+            note("WHOAMI");
         }
     }
 
+    // ---- Settings that silently transform the geometry. These stop the run.
+    {
+        SRCROT_CONFIG srcrot{};
+        if (queryConfig(CMD_SRC_ROTATION, 0, &srcrot, sizeof(srcrot))) {
+            mdx::DeviceRotation rotation;
+            for (int i = 0; i < 4; i++)
+                rotation.params[i] = srcrot.rot[i];
+
+            if (!rotation.isNeutral()) {
+                raiseFatalError(mdx::sourceRotationMessage(0, rotation));
+                return;
+            }
+        } else {
+            note("source rotation");
+        }
+    }
+
+    for (uint32_t sensor = 0; sensor < nSensors; sensor++) {
+        const std::string label = " (sensor " + std::to_string(sensor) + ")";
+
+        TIP_OFFSET_CONFIG tipoff{};
+        if (queryConfig(CMD_TIP_OFFSET, sensor, &tipoff, sizeof(tipoff))) {
+            const Eigen::Vector3d offset{tipoff.params[0], tipoff.params[1], tipoff.params[2]};
+
+            if (offset.norm() > 1e-9) {
+                std::stringstream ss;
+                ss << "The Viper is already applying a tip offset of [" << offset.x() << ", "
+                   << offset.y() << ", " << offset.z() << "] to sensor " << sensor
+                   << ". Positions it reports are therefore already displaced to a tip, and the "
+                      "probe_profiles offset would be added on top of it. Clear it on the device "
+                      "(CMD_TIP_OFFSET reset) and let probe_profiles own the offset.";
+                raiseFatalError(ss.str());
+                return;
+            }
+        } else {
+            note("tip offset" + label);
+        }
+
+        BORESIGHT_CONFIG boresight{};
+        if (queryConfig(CMD_BORESIGHT, sensor, &boresight, sizeof(boresight))) {
+            mdx::DeviceRotation rotation;
+            for (int i = 0; i < 4; i++)
+                rotation.params[i] = boresight.params[i];
+
+            if (!rotation.isNeutral()) {
+                raiseFatalError(mdx::boresightMessage(static_cast<int>(sensor), rotation));
+                return;
+            }
+        } else {
+            note("boresight" + label);
+        }
+
+        uint32_t origin = 0;
+        if (queryConfig(CMD_SNS_ORIGIN, sensor, &origin, sizeof(origin))) {
+            if (!mdx::isDefaultSensorOrigin(origin)) {
+                raiseFatalError(mdx::sensorOriginMessage(static_cast<int>(sensor), origin));
+                return;
+            }
+        } else {
+            note("sensor origin" + label);
+        }
+
+        // ---- Settings that change latency and cadence but not geometry.
+        FILTER_CONFIG filter{};
+        if (queryConfig(CMD_FILTER, sensor, &filter, sizeof(filter))) {
+            mdx::FilterSettings settings;
+            settings.level = filter.level;
+            for (int i = 0; i < 4; i++)
+                settings.params[i] = filter.params[i];
+
+            fgInterface_->logInfo("Filter" + label + ": " + mdx::describeFilter(settings));
+        } else {
+            note("filter" + label);
+        }
+
+        PF_CONFIG predictive{};
+        if (queryConfig(CMD_PREDFILTER_CFG, sensor, &predictive, sizeof(predictive))) {
+            mdx::PredictiveFilterSettings settings;
+            settings.quaternion = predictive.qFil_on != 0;
+            settings.position = predictive.rFil_on != 0;
+            settings.predictionSeconds = predictive.predTimeS;
+
+            fgInterface_->logInfo("Predictive filter" + label + ": " +
+                                  mdx::describePredictiveFilter(settings));
+        } else {
+            note("predictive filter" + label);
+        }
+
+        // The extended form leads with the same three fields, so only those are
+        // read; the rest is documented as internal use.
+        PF_CONFIG predictiveExt{};
+        if (queryConfig(CMD_PREDFILTER_EXT, sensor, &predictiveExt, sizeof(predictiveExt))) {
+            mdx::PredictiveFilterSettings settings;
+            settings.quaternion = predictiveExt.qFil_on != 0;
+            settings.position = predictiveExt.rFil_on != 0;
+            settings.predictionSeconds = predictiveExt.predTimeS;
+
+            fgInterface_->logInfo("Predictive filter, extended" + label + ": " +
+                                  mdx::describePredictiveFilter(settings));
+        } else {
+            note("predictive filter, extended" + label);
+        }
+
+        INCREMENT_CONFIG increment{};
+        if (queryConfig(CMD_INCREMENT, sensor, &increment, sizeof(increment))) {
+            mdx::IncrementSettings settings;
+            settings.enabled = increment.enabled != 0;
+            settings.positionThreshold = increment.fPosThresh;
+            settings.orientationThreshold = increment.fOriThresh;
+
+            fgInterface_->logInfo("Increment mode" + label + ": " +
+                                  mdx::describeIncrement(settings));
+        } else {
+            note("increment mode" + label);
+        }
+    }
+
+    {
+        uint32_t frameRate = 0;
+        if (queryConfig(CMD_FRAMERATE, 0, &frameRate, sizeof(frameRate)))
+            fgInterface_->logInfo("Frame rate: " + mdx::frameRateLabel(frameRate));
+        else
+            note("frame rate");
+    }
+
+    fgInterface_->logInfo("--- end of Viper device configuration ---");
+
     if (!unreadable.empty()) {
-        // Not fatal: failing to read the setting is not evidence that it is set,
-        // and refusing to run on a silent device would be worse than saying so.
+        // Not fatal. Failing to read a setting is not evidence that it is safe,
+        // but refusing to run on a device that answers some queries and not
+        // others would be worse than saying which ones went unanswered.
         std::stringstream ss;
-        ss << "Could not read the Viper's own tip offset for sensor(s)";
-        for (const auto &sensor : unreadable)
-            ss << " " << sensor;
-        ss << ". If the device has one configured, the published tip will be displaced twice. "
-              "Check it with the Polhemus configuration utility.";
+        ss << "Could not read the following Viper settings, so they are unverified:";
+        for (const auto &what : unreadable)
+            ss << " " << what << ";";
+        ss << " a geometry transform hiding in one of those would displace the published tip.";
         fgInterface_->logWarning(ss.str());
+    }
+}
+
+void Viper::monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t frameCounter) {
+    // The frame counter is in every frame and was previously read and thrown
+    // away. Gaps in it are the direct evidence of dropped data that an
+    // unexplained publish rate only hints at.
+    if (haveFrameCounter_) {
+        const uint32_t expected = lastFrameCounter_ + 1;
+
+        if (frameCounter != expected) {
+            const uint32_t missing = frameCounter - expected;   // wraps correctly
+
+            // A backwards or wildly large jump is a counter reset, not a drop.
+            if (missing < 1000u) {
+                framesDropped_ += missing;
+
+                if ((++frameGapEvents_ % 100) == 1) {
+                    std::stringstream ss;
+                    ss << "Gap in the Viper frame counter: " << missing
+                       << " frame(s) missing (" << framesDropped_ << " dropped across "
+                       << frameGapEvents_ << " gap(s) so far)";
+                    fgInterface_->logWarning(ss.str());
+                }
+            }
+        }
+    }
+
+    lastFrameCounter_ = frameCounter;
+    haveFrameCounter_ = true;
+
+    for (uint32_t i = 0; i < nSensors; i++) {
+        const SENFRAMEDATA *pfd = pfd_all + i;
+
+        // A virtual sensor is one the SEU reports without it being physically
+        // present. Fusing it would average a fabricated pose into the tip, so
+        // this stops rather than quietly averaging.
+        if (pfd->SFinfo.bfSvirt) {
+            std::stringstream ss;
+            ss << "Sensor " << i
+               << " is reported as virtual. It has no physical sensor behind it, so fusing it "
+                  "would average a fabricated pose into the probe tip. Remove the virtual sensor "
+                  "on the device (CMD_SNS_VIRTUAL reset) or connect the missing sensor.";
+            raiseFatalError(ss.str());
+            return;
+        }
+
+        const uint32_t distortion = pfd->SFinfo.bfDistortion;
+        if (distortion >= mdx::kDistortionWarnLevel) {
+            if ((++distortedFrames_ % 200) == 1) {
+                fgInterface_->logWarning(
+                        mdx::distortionMessage(distortion, static_cast<int>(i), distortedFrames_));
+            }
+        }
     }
 }
 
@@ -291,14 +468,19 @@ void Viper::publishContinuous() {
             std::cout << "Viper reporting " << mdx::describe(units) << std::endl;
         }
 
-        // Per-sensor, so it needs the count the first frame just gave us.
+        // Per-sensor queries, so this needs the count the first frame gave us.
         if (!deviceTipOffsetsChecked_ && nSensors > 0) {
             deviceTipOffsetsChecked_ = true;
-            checkDeviceTipOffsets(nSensors);
+            readDeviceState(nSensors);
 
             if (fatalError_)
                 break;
         }
+
+        monitorFrame(pfd, nSensors, frame);
+
+        if (fatalError_)
+            break;
 
         pnoToFoxgloveSceneUpdate(pfd, nSensors);
     }

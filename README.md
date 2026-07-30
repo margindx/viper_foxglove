@@ -123,6 +123,44 @@ Neither mistake announces itself, so the program reads the units from the first 
 on anything else, naming what the device reported and what is required. On the good path it logs the detected
 units once at startup. Nothing here ever *sets* the units — use `CMD_UNITS` on the device.
 
+### Device configuration readout
+
+On the first frame the program reads the SEU's own configuration and logs it to `/viper/log`, so every MCAP
+recording carries the device state it was made under. That question is otherwise unanswerable after the fact,
+and it matters: a stale `CMD_TIP_OFFSET` was once displacing every published tip by 143 mm with nothing in the
+data to show it.
+
+**Settings that silently transform the geometry stop the run**, because the program applies its own transform
+on top of them and the result looks like a mounting fault rather than a configuration one:
+
+| Setting | Effect if set |
+| --- | --- |
+| `CMD_TIP_OFFSET` | the device has already displaced positions to a tip; `tip_offset_m` is then added again |
+| `CMD_BORESIGHT` | orientations are pre-rotated, so the tip offset is applied along a rotated frame |
+| `CMD_SNS_ORIGIN` | the sensor reports about a different origin than the published frames assume |
+| `CMD_SRC_ROTATION` | the whole tracker frame is rotated |
+
+**Settings that affect latency or cadence are logged, not gated**: `CMD_FILTER`, `CMD_PREDFILTER_CFG` and
+`_EXT`, `CMD_FRAMERATE`, `CMD_INCREMENT`, and `CMD_WHOAMI` (device, serial, firmware). Increment mode is worth
+noticing — it makes the device report only after a movement threshold, which presents as an irregular stream
+rather than as an error.
+
+A setting the device declines to report is logged as **unverified** rather than assumed safe. Failing to read
+a setting is not evidence that it is unset.
+
+### Per-frame monitoring
+
+Three fields arrive in every frame and are checked rather than discarded:
+
+- **Distortion** (`SFinfo.bfDistortion`, 0–255) — EM distortion degrades position and orientation directly and
+  is otherwise invisible. A rate-limited warning is logged above a threshold. That threshold is a guess, not a
+  measured limit, and wants tuning against a rig known to be clean.
+- **The frame counter** — gaps are the direct evidence of dropped data that an unexplained publish rate only
+  hints at. Counted and reported, with backwards or very large jumps treated as a counter reset rather than a
+  drop.
+- **The virtual-sensor flag** (`SFinfo.bfSvirt`) — a sensor the SEU reports without one being physically
+  present. Fusing it would average a fabricated pose into the tip, so it stops the run.
+
 ### Probe profiles
 
 The probe tip offset depends on which probe is fitted, and each probe design presents a different number of EM

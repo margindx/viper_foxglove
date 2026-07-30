@@ -148,6 +148,8 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         ProbeProfile.hpp
         FrameUnits.cpp
         FrameUnits.hpp
+        DeviceState.cpp
+        DeviceState.hpp
         PivotSolve.cpp
         PivotSolve.hpp
         ProbeConfigIo.cpp
@@ -244,12 +246,15 @@ if(Catch2_FOUND)
     add_executable(viper_tests
             tests/test_probe_profile.cpp
             tests/test_frame_units.cpp
+            tests/test_device_state.cpp
             tests/test_pivot_solve.cpp
             tests/test_calibration_session.cpp
             ProbeProfile.cpp
             ProbeProfile.hpp
             FrameUnits.cpp
             FrameUnits.hpp
+            DeviceState.cpp
+            DeviceState.hpp
             PivotSolve.cpp
             PivotSolve.hpp
             ProbeConfigIo.cpp
