@@ -42,7 +42,7 @@ std::string describe(PositionUnits units) {
         case PositionUnits::Unknown: break;
     }
 
-    return "an unrecognised unit";
+    return "an unrecognized unit";
 }
 
 std::string describe(OrientationUnits units) {
@@ -53,7 +53,7 @@ std::string describe(OrientationUnits units) {
         case OrientationUnits::Unknown: break;
     }
 
-    return "an unrecognised unit";
+    return "an unrecognized unit";
 }
 
 std::string describe(const FrameUnits &units) {

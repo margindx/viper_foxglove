@@ -57,7 +57,7 @@ Eigen::Quaterniond quaternionFromZyxDegrees(double azimuthDeg, double elevationD
 /// componentwise too, but each quaternion is first flipped into the hemisphere
 /// of the first one: q and -q represent the same rotation, so summing raw
 /// components can cancel to near-zero and produce an arbitrary result after
-/// normalisation.
+/// normalization.
 ///
 /// A single input pose is returned verbatim (no arithmetic, so no rounding):
 /// with one sensor the published pose is exactly what the device reported.

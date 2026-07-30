@@ -92,7 +92,7 @@ std::optional<Pose> fusePoses(const std::vector<Pose> &poses) {
         positionSum += pose.position;
 
         // q and -q are the same rotation. Without this flip the componentwise
-        // sum of antipodal representations cancels, and normalising the
+        // sum of antipodal representations cancels, and normalizing the
         // near-zero result yields an arbitrary orientation.
         Eigen::Quaterniond q = pose.orientation.normalized();
         if (q.coeffs().dot(reference.coeffs()) < 0.0)

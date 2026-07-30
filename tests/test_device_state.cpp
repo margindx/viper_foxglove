@@ -24,7 +24,7 @@ DeviceRotation rotation(double a, double b, double c, double d) {
 
 } // namespace
 
-TEST_CASE("a neutral device rotation is recognised in either convention", "[device]") {
+TEST_CASE("a neutral device rotation is recognized in either convention", "[device]") {
     SECTION("all zeros") {
         REQUIRE(rotation(0, 0, 0, 0).isNeutral());
     }
@@ -62,14 +62,14 @@ TEST_CASE("sensor origin defaults to source 1", "[device]") {
 
     REQUIRE(sensorOriginLabel(0).find("default") != std::string::npos);
     REQUIRE(sensorOriginLabel(4) == "common");
-    REQUIRE(sensorOriginLabel(99).find("unrecognised") != std::string::npos);
+    REQUIRE(sensorOriginLabel(99).find("unrecognized") != std::string::npos);
 }
 
 TEST_CASE("frame rate codes map to their rates", "[device]") {
     REQUIRE(frameRateLabel(0) == "30 Hz");
     REQUIRE(frameRateLabel(3) == "240 Hz");
     REQUIRE(frameRateLabel(5) == "960 Hz");
-    REQUIRE(frameRateLabel(7).find("unrecognised") != std::string::npos);
+    REQUIRE(frameRateLabel(7).find("unrecognized") != std::string::npos);
 }
 
 TEST_CASE("refusal messages say what was found and how to clear it", "[device]") {

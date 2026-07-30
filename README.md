@@ -185,7 +185,7 @@ sensors to the Viper SEU. `probe_profiles` maps one to the other:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `sensor_count` | int ≥ 1 | yes | Number of connected EM sensors this profile applies to. Each count may appear at most once. |
-| `tip_offset_m` | `[x, y, z]` | yes | Offset in **meters** from the fused sensor origin to the probe tip, in the sensor frame. `x` is the along-probe direction; `y`/`z` are offsets to the probe centre and are normally `0`. |
+| `tip_offset_m` | `[x, y, z]` | yes | Offset in **meters** from the fused sensor origin to the probe tip, in the sensor frame. `x` is the along-probe direction; `y`/`z` are offsets to the probe center and are normally `0`. |
 | `tip_rotation_zyx_deg` | `[az, el, roll]` | no | Rotation from the sensor frame to the tip frame, in degrees, using the Viper's own Z-Y-X (azimuth / elevation / roll) convention. Omit for identity. |
 | `label` | string | no | Name echoed to the log when the profile is selected. |
 
@@ -290,7 +290,7 @@ carry no information about the translation at all.
 
 Positions are averaged. Orientations are averaged componentwise **after** flipping each quaternion into the
 same hemisphere as the first sensor's: `q` and `−q` are the same rotation, so summing the raw components can
-cancel to near-zero and yield an arbitrary orientation after normalisation. The tip transform is then applied
+cancel to near-zero and yield an arbitrary orientation after normalization. The tip transform is then applied
 to the fused pose, and the published orientation is the tip frame's.
 
 With `sensor_count: 1` the fusion is a pass-through: the published pose is exactly the sensor's own pose with

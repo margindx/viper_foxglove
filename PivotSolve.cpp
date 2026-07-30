@@ -116,7 +116,7 @@ DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
         }
         metrics.coneHalfAngleDeg = widest * kRadToDeg;
     } else {
-        // Directions cancelled out entirely, which means they are spread over
+        // Directions canceled out entirely, which means they are spread over
         // more than a hemisphere -- ample diversity.
         metrics.coneHalfAngleDeg = 180.0;
     }
@@ -263,9 +263,9 @@ std::optional<DirectionResult> solveCommonDirection(const std::vector<Calibratio
     if (samples.size() < 2 || !allUsable(samples))
         return std::nullopt;
 
-    // Minimising sum ||R_i v - n||^2 over unit v and unit n reduces to
-    // maximising |S v| where S is the sum of the rotations, so v is S's leading
-    // right-singular vector and n is the normalised image of v.
+    // Minimizing sum ||R_i v - n||^2 over unit v and unit n reduces to
+    // maximizing |S v| where S is the sum of the rotations, so v is S's leading
+    // right-singular vector and n is the normalized image of v.
     Eigen::Matrix3d sum = Eigen::Matrix3d::Zero();
     std::vector<Eigen::Matrix3d> rotations;
     rotations.reserve(samples.size());
@@ -375,7 +375,7 @@ std::optional<Eigen::Quaterniond> tipRotationFromAxes(const Eigen::Vector3d &fac
 
     const Eigen::Vector3d x = faceNormalSensor.normalized();
 
-    // Orthogonalise the reference against the face normal, so the second
+    // Orthogonalize the reference against the face normal, so the second
     // capture does not have to be perpendicular to the first -- only
     // non-parallel.
     Eigen::Vector3d y = inPlaneReferenceSensor.normalized();

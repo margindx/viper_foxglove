@@ -65,7 +65,7 @@ std::string sensorOriginLabel(std::uint32_t mode) {
         default: break;
     }
 
-    return "unrecognised origin " + std::to_string(mode);
+    return "unrecognized origin " + std::to_string(mode);
 }
 
 std::string frameRateLabel(std::uint32_t code) {
@@ -79,7 +79,7 @@ std::string frameRateLabel(std::uint32_t code) {
         default: break;
     }
 
-    return "unrecognised frame rate code " + std::to_string(code);
+    return "unrecognized frame rate code " + std::to_string(code);
 }
 
 std::string boresightMessage(int sensor, const DeviceRotation &rotation) {

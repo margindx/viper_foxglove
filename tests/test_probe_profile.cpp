@@ -107,7 +107,7 @@ TEST_CASE("antipodal quaternions fuse correctly", "[fuse][regression]") {
     // Regression test for the sign bug: q and -q denote the same rotation, so
     // three sensors that agree perfectly must fuse to that rotation even when
     // one of them reports the antipodal representation. The previous
-    // componentwise mean cancelled to near-zero here and, after normalising,
+    // componentwise mean canceled to near-zero here and, after normalizing,
     // returned an essentially arbitrary orientation.
     const auto q = quaternionFromZyxDegrees(45.0, 0.0, 0.0);
     const Eigen::Quaterniond negated{-q.w(), -q.x(), -q.y(), -q.z()};
@@ -139,7 +139,7 @@ TEST_CASE("antipodal quaternions fuse correctly", "[fuse][regression]") {
     }
 
     SECTION("two sensors reporting the same rotation with opposite signs") {
-        // The old componentwise mean cancelled exactly here and divided by a
+        // The old componentwise mean canceled exactly here and divided by a
         // zero magnitude, publishing a NaN pose.
         const std::vector<Pose> poses{
                 makePose({0, 0, 0}, q),
@@ -320,7 +320,7 @@ TEST_CASE("parseProbeProfiles accepts a well-formed config", "[parse]") {
     REQUIRE(profiles[0].label == "legacy triple");
     REQUIRE(profiles[0].tip.translation.isApprox(Eigen::Vector3d{0.157, 0, 0}));
 
-    // An omitted rotation must mean identity, so existing behaviour is preserved.
+    // An omitted rotation must mean identity, so existing behavior is preserved.
     REQUIRE(sameRotation(profiles[1].tip.rotation, kIdentity));
     REQUIRE(profiles[1].sensorCount == 1);
 }

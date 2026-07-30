@@ -53,14 +53,14 @@ std::string timestampSuffix() {
     return ss.str();
 }
 
-std::string formatMetres(const Eigen::Vector3d &v) {
+std::string formatMeters(const Eigen::Vector3d &v) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(4) << "[" << v.x() << ", " << v.y() << ", " << v.z()
        << "] m";
     return ss.str();
 }
 
-std::string formatMillimetres(const Eigen::Vector3d &v) {
+std::string formatMillimeters(const Eigen::Vector3d &v) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2) << "[" << v.x() * 1000.0 << ", " << v.y() * 1000.0
        << ", " << v.z() * 1000.0 << "] mm";
@@ -205,10 +205,10 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
     std::cout << "\n=== Result for " << sensorCount << " sensor"
               << (sensorCount == 1 ? "" : "s") << " ===\n";
 
-    std::cout << "  Tip offset            " << formatMetres(outcome.tipOffset) << "\n";
+    std::cout << "  Tip offset            " << formatMeters(outcome.tipOffset) << "\n";
     std::cout << "  Pivot residual (RMS)  " << std::fixed << std::setprecision(2)
               << outcome.pivot.residualRms * 1000.0 << " mm\n";
-    std::cout << "  Residual per axis     " << formatMillimetres(outcome.pivot.residualRmsProbeFrame)
+    std::cout << "  Residual per axis     " << formatMillimeters(outcome.pivot.residualRmsProbeFrame)
               << "  (sensor body axes)\n";
     std::cout << "  Samples / condition   " << outcome.pivot.sampleCount << " / " << std::fixed
               << std::setprecision(1) << outcome.pivot.conditionNumber << "\n";
@@ -234,7 +234,7 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
 
     if (outcome.planeCheck.has_value()) {
         std::cout << "\n  Independent check (plane constraint):\n";
-        std::cout << "    Tip offset          " << formatMetres(outcome.planeCheck->tipOffset)
+        std::cout << "    Tip offset          " << formatMeters(outcome.planeCheck->tipOffset)
                   << "\n";
         std::cout << "    Disagreement        " << std::fixed << std::setprecision(2)
                   << outcome.offsetDisagreementM * 1000.0 << " mm\n";
@@ -359,7 +359,7 @@ int runCalibration(const std::string &configPath) {
 
     const auto existing = readProfile(configPath, sensorCount);
     if (existing.has_value()) {
-        std::cout << "Existing profile: tip offset " << formatMetres(existing->tipOffsetM);
+        std::cout << "Existing profile: tip offset " << formatMeters(existing->tipOffsetM);
         if (!existing->label.empty())
             std::cout << ", label \"" << existing->label << "\"";
         std::cout << "\n";

@@ -321,7 +321,7 @@ TEST_CASE("tip rotation is built from the two calibrated directions", "[rotation
         REQUIRE(rotationAngleDeg(*q) < 1e-9);
     }
 
-    SECTION("the long axis is orthogonalised against the face normal") {
+    SECTION("the long axis is orthogonalized against the face normal") {
         // A long axis measured 10 degrees out of perpendicular must still give
         // the same rotation as a perfect one.
         const Eigen::Vector3d skewed =

@@ -5,7 +5,7 @@
 //
 //   A. Rocking pivot -- the tip is held against a flat surface while the probe
 //      is swept through orientations. Solves p_pivot = p_i + R_i*t for the tip
-//      offset t and the (constant) pivot point. Note the tip here is the centre
+//      offset t and the (constant) pivot point. Note the tip here is the center
 //      of a 10 x 1 mm face, not a point: as the probe tilts the contact point
 //      migrates across that face, biasing the solve by up to half the footprint
 //      length. The bias is strongly anisotropic, so residuals are reported per
@@ -73,7 +73,7 @@ struct CaptureCriteria {
 /// wrong thing to measure.
 struct DirectionCriteria {
     std::size_t minSamples{20};
-    /// Normalised gap between the first two singular values of the summed
+    /// Normalized gap between the first two singular values of the summed
     /// rotations. Zero means every placement was identical and the direction is
     /// undetermined; larger means the spin genuinely varied.
     double minSeparation{0.15};
@@ -168,7 +168,7 @@ struct PlaneTranslationResult {
 /// rather than a plausible-looking wrong answer.
 ///
 /// This is a genuinely independent estimate rather than a better one. It
-/// assumes the tip centre lies on the surface, which is violated as the probe
+/// assumes the tip center lies on the surface, which is violated as the probe
 /// tilts onto an edge, so it carries its own bias -- a different one from the
 /// pivot's contact migration. Agreement between the two is evidence; a large
 /// disagreement means at least one model is being strained.
@@ -182,7 +182,7 @@ std::optional<PlaneTranslationResult> solvePlaneTranslation(
 /// along the footprint's long axis, +z completing the right-handed set.
 ///
 /// `inPlaneReferenceSensor` is whatever second direction the capture pinned
-/// down. It is orthogonalised against the face normal, so it need not be
+/// down. It is orthogonalized against the face normal, so it need not be
 /// perpendicular to it -- only non-parallel.
 ///
 /// `rollOffsetDeg` rotates the resulting +y about +x, and is how a reference
