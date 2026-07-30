@@ -187,8 +187,13 @@ DiversityMetrics assessDirectionCapture(const std::vector<CalibrationSample> &sa
                      << " placements. ";
         }
         if (!enoughSpin) {
-            guidance << "Rotate the probe about its own axis between placements -- the "
-                        "orientations so far are too alike to pin the direction down. ";
+            // Not "rotate about its own axis": with the probe lying on a flat,
+            // that reads as rolling it about its long axis, which lifts the
+            // flat off the surface. Only the heading may change.
+            guidance << "Turn the probe to a different heading between placements, keeping the "
+                        "flat on the surface -- the orientations so far are too alike to pin the "
+                        "direction down. Sliding it without turning it adds samples but no "
+                        "information. ";
         }
         metrics.guidance = guidance.str();
     }

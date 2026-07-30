@@ -224,7 +224,11 @@ TEST_CASE("direction capture is judged on spin, not tilt", "[diversity][directio
         const auto metrics = assessDirectionCapture(samples);
 
         REQUIRE_FALSE(metrics.sufficient);
-        REQUIRE(metrics.guidance.find("Rotate") != std::string::npos);
+        REQUIRE(metrics.guidance.find("heading") != std::string::npos);
+
+        // Must not read as an instruction to roll the probe about its long
+        // axis, which would take the flat off the surface.
+        REQUIRE(metrics.guidance.find("own axis") == std::string::npos);
     }
 }
 
