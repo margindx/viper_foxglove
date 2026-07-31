@@ -882,6 +882,14 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
             latestFusedPose_ = fused;
         }
 
+        // Latched under the same condition as the fusion, so the two always
+        // describe the same frame. Gating on fusePoses succeeding also means
+        // these have passed its finite-and-unit-norm checks.
+        {
+            std::lock_guard<std::mutex> guard{sensorPosesMtx_};
+            latestSensorPoses_ = sensorPoses;
+        }
+
         // Without a profile there is no trustworthy offset, so no tip pose is
         // published. That was reported above; the raw per-sensor poses still go
         // out below either way.

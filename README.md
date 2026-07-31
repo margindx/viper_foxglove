@@ -393,6 +393,63 @@ device matches, otherwise the sensor stays disabled and the program keeps lookin
 > **macOS:** VID/PID auto-detection is not implemented, so the force sensor is unsupported on macOS (it stays
 > disabled). Windows and Linux only.
 
+### Checking that the sensor is not moving inside the probe
+
+```
+./viper --monitor            # (Windows: .\viper.exe --monitor)
+```
+
+Every tip offset assumes the EM sensor is rigidly fixed in the probe body. If it can slide or rotate in its
+housing — dragged by its own cable, say — then the offset is not a constant, and no amount of care during
+calibration will pin it down. The symptom is calibration runs that each look internally consistent but
+disagree with each other, which is indistinguishable from a run of poor captures.
+
+**The main test involves no probe motion at all.** Rest the probe on the bench and disturb only its cable:
+pull, release, pull again, twist it, let it hang over the edge. The body is stationary by construction, so
+you do not need a second sensor to certify it did not move — anything that moves is the sensor inside it.
+Holding the probe still also freezes the field, which no moving test can do: any test that carries the probe
+around confounds mechanical change with distortion that varies from place to place.
+
+Mark each pull and release with `m pull` / `m release` as you make it. **Correlation with the marks is the
+evidence, not the excursion itself** — a step that repeats with every load and reverses on release is
+mechanical, while drift does not care what your hand is doing. A run with no marks cannot tell them apart,
+and the summary says so.
+
+The run opens by holding still for five seconds to measure the noise floor, and every later excursion is
+reported as a multiple of it. Below about 3× there is nothing a run of this length could see.
+
+| key | effect |
+| --- | --- |
+| `m [label]` | mark an event, e.g. `m pull` — also written to the MCAP |
+| `r` | re-capture the baseline (probe still and unloaded) |
+| `p` | clear the peak hold |
+| `q` | finish and print the summary |
+
+Peaks are held because the informative moment is transient: a tug is over before you can look up.
+
+**Watch orientation at least as closely as position.** At a 194 mm offset, one degree of sensor rotation is
+3.4 mm at the tip, so a rotation far too small to see or feel outweighs a position shift that would be
+obvious. When `probe_profiles` has an entry for the connected sensor count, its offset length is used as a
+lever arm and the tip-equivalent displacement is shown alongside.
+
+#### With two or more sensors
+
+Two sensors rigidly mounted on one body hold a constant transform between them, however the probe is moved.
+The monitor tracks that transform for every sensor pair, so **any drift there is relative movement** —
+established with no bench, no pivot and no tip offset involved. This is the decisive form of the test, and it
+needs a second sensor clamped (not taped — otherwise you are measuring the tape) to the probe.
+
+Two things make it more useful than it first appears:
+
+- A **multi-sensor probe whose mounting is known good** can be run first, to see what "rigid" looks like in
+  your field including distortion. That calibrates the test itself.
+- With three sensors, one working loose shows up in two pairs and not the third, which localizes it. All
+  pairs are tracked rather than consecutive ones for exactly this reason.
+
+Like `--calibrate`, this does not require an existing `probe_profiles` entry: a probe whose sensor may be
+loose is often one that has never calibrated cleanly enough to have one. The full trace and the event marks
+are written to `viper-monitor.mcap`.
+
 ### Documenting fields inline
 
 Because JSON has no native comment syntax, `viper-config.json` documents each setting inside a `_comment`

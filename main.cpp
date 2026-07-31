@@ -2,6 +2,7 @@
 #include "viper_ui.h"
 #include "ProbeProfile.hpp"
 #include "Calibrate.hpp"
+#include "Monitor.hpp"
 #include "Viper.hpp"
 #include "SerialForce.hpp"
 #include "FoxgloveInterface.hpp"
@@ -225,18 +226,25 @@ int main(int argc, char** argv) {
 
     std::string config_filename = "viper-config.json";
     bool calibrate = false;
+    bool monitor = false;
 
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
 
         if (arg == "--calibrate") {
             calibrate = true;
+        } else if (arg == "--monitor") {
+            monitor = true;
         } else if (arg == "--help" || arg == "-h") {
-            cout << "Usage: viper [--calibrate] [config-file]\n\n"
+            cout << "Usage: viper [--calibrate | --monitor] [config-file]\n\n"
                  << "  --calibrate   Run the guided probe tip calibration and update the\n"
                  << "                config. Unlike a normal run this does not require an\n"
                  << "                existing probe_profiles entry for the connected sensor\n"
                  << "                count, so a probe can be calibrated for the first time.\n"
+                 << "  --monitor     Watch for the EM sensor moving inside the probe body,\n"
+                 << "                which would make the tip offset a quantity that varies\n"
+                 << "                and cannot be calibrated away. Also needs no existing\n"
+                 << "                probe_profiles entry.\n"
                  << "  config-file   Defaults to viper-config.json in the working directory.\n";
             return 0;
         } else {
@@ -247,8 +255,20 @@ int main(int argc, char** argv) {
     // Calibration deliberately bypasses the probe_profiles requirement: the
     // whole point is to produce that entry, and the normal path refuses to
     // start without it.
+    if (calibrate && monitor) {
+        cerr << "--calibrate and --monitor are separate procedures; run one at a time.\n";
+        return 1;
+    }
+
     if (calibrate) {
         return mdx::runCalibration(config_filename);
+    }
+
+    // Monitoring, like calibration, bypasses the probe_profiles requirement: a
+    // probe whose sensor may be loose is often one that has never calibrated
+    // cleanly enough to have an entry.
+    if (monitor) {
+        return mdx::runMonitor(config_filename);
     }
 
     return launchFoxglove(config_filename);

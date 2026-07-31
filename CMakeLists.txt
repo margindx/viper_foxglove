@@ -158,6 +158,10 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         CalibrationSession.hpp
         Calibrate.cpp
         Calibrate.hpp
+        StabilityMonitor.cpp
+        StabilityMonitor.hpp
+        Monitor.cpp
+        Monitor.hpp
         Viper.cpp
         Viper.hpp
         FoxgloveInterface.cpp
@@ -249,6 +253,7 @@ if(Catch2_FOUND)
             tests/test_device_state.cpp
             tests/test_pivot_solve.cpp
             tests/test_calibration_session.cpp
+            tests/test_stability_monitor.cpp
             ProbeProfile.cpp
             ProbeProfile.hpp
             FrameUnits.cpp
@@ -260,7 +265,9 @@ if(Catch2_FOUND)
             ProbeConfigIo.cpp
             ProbeConfigIo.hpp
             CalibrationSession.cpp
-            CalibrationSession.hpp)
+            CalibrationSession.hpp
+            StabilityMonitor.cpp
+            StabilityMonitor.hpp)
 
     target_include_directories(viper_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}

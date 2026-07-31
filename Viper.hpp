@@ -108,6 +108,12 @@ protected:
     std::mutex fusedPoseMtx_;
     std::optional<mdx::Pose> latestFusedPose_;
 
+    /// Most recent per-sensor poses, unfused. Stability monitoring needs these
+    /// rather than the fusion: averaging several sensors is precisely what
+    /// hides one of them moving relative to the others.
+    std::mutex sensorPosesMtx_;
+    std::vector<mdx::Pose> latestSensorPoses_;
+
     /// Set when the run cannot continue safely. The publish thread stops and
     /// main is expected to notice and exit non-zero.
     std::atomic_bool fatalError_{false};
@@ -262,6 +268,13 @@ public:
     std::optional<mdx::Pose> latestFusedPose() {
         std::lock_guard<std::mutex> guard{fusedPoseMtx_};
         return latestFusedPose_;
+    }
+
+    /// The per-sensor poses from the most recent usable frame, in sensor order,
+    /// before fusion or any tip transform. Empty until the first such frame.
+    std::vector<mdx::Pose> latestSensorPoses() {
+        std::lock_guard<std::mutex> guard{sensorPosesMtx_};
+        return latestSensorPoses_;
     }
 
     /// Distortion since the last resetDistortion(). Safe to call from any thread.
