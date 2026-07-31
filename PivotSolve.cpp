@@ -78,11 +78,43 @@ double rotationAngleDeg(const Eigen::Quaterniond &q) {
 }
 
 Eigen::Vector3d zyxDegreesFromQuaternion(const Eigen::Quaterniond &q) {
-    // eulerAngles(2, 1, 0) returns the Z-Y-X sequence in that order, matching
-    // quaternionFromZyxDegrees(azimuth, elevation, roll).
-    const Eigen::Vector3d zyx = q.normalized().toRotationMatrix().eulerAngles(2, 1, 0);
+    // Extracted from the rotation matrix directly rather than via
+    // Eigen::eulerAngles, which is free to return any valid decomposition and
+    // near identity picks a branch giving [180, -180, -180]. That is correct as
+    // a rotation and useless as a written value: it is going into a config file
+    // for a person to read, and "the tip frame is square with the sensor"
+    // should not look like three half-turns.
+    //
+    // For R = Rz(azimuth) * Ry(elevation) * Rx(roll), matching
+    // quaternionFromZyxDegrees:
+    //
+    //     elevation = asin(-R(2,0))
+    //     azimuth   = atan2(R(1,0), R(0,0))
+    //     roll      = atan2(R(2,1), R(2,2))
+    //
+    // which puts elevation in [-90, 90] and the other two in (-180, 180], one
+    // representation per rotation, and the smallest one.
+    const Eigen::Matrix3d r = q.normalized().toRotationMatrix();
 
-    return Eigen::Vector3d{zyx.x() * kRadToDeg, zyx.y() * kRadToDeg, zyx.z() * kRadToDeg};
+    const double sinElevation = std::max(-1.0, std::min(1.0, -r(2, 0)));
+    const double elevation = std::asin(sinElevation);
+
+    double azimuth = 0.0;
+    double roll = 0.0;
+
+    // At elevation = +/-90 the azimuth and roll axes coincide and only their
+    // sum or difference is determined. Pin roll to zero and put the whole
+    // rotation into azimuth, rather than splitting it arbitrarily between them.
+    constexpr double kGimbalTolerance = 1e-9;
+    if (std::abs(r(0, 0)) < kGimbalTolerance && std::abs(r(1, 0)) < kGimbalTolerance) {
+        azimuth = std::atan2(-r(0, 1), r(1, 1));
+        roll = 0.0;
+    } else {
+        azimuth = std::atan2(r(1, 0), r(0, 0));
+        roll = std::atan2(r(2, 1), r(2, 2));
+    }
+
+    return Eigen::Vector3d{azimuth * kRadToDeg, elevation * kRadToDeg, roll * kRadToDeg};
 }
 
 DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,

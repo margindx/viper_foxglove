@@ -407,6 +407,57 @@ TEST_CASE("rotationAngleDeg measures distance from identity", "[rotation]") {
     REQUIRE(std::abs(rotationAngleDeg(negated) - 90.0) < 1e-9);
 }
 
+TEST_CASE("zyxDegreesFromQuaternion returns the canonical triple", "[rotation][regression]") {
+    // The value goes into a config file for a person to read, so a rotation
+    // near identity has to be written as near zero. Eigen::eulerAngles is free
+    // to return any valid decomposition and near identity chose one reading
+    // [180, -180, -180] -- correct, and certain to be "corrected" by whoever
+    // found it in their config.
+    SECTION("exact identity") {
+        const Eigen::Vector3d zyx = zyxDegreesFromQuaternion(Eigen::Quaterniond::Identity());
+        REQUIRE(zyx.norm() < 1e-9);
+    }
+
+    SECTION("identity reached through the axis construction") {
+        // This is the path that produced [180, -180, -180]: a rotation built
+        // from cross products, identity only to within rounding.
+        const auto built = tipRotationFromAxes(Eigen::Vector3d::UnitX(), Eigen::Vector3d::UnitY());
+        REQUIRE(built.has_value());
+        REQUIRE(rotationAngleDeg(*built) < 1e-9);
+        REQUIRE(zyxDegreesFromQuaternion(*built).norm() < 1e-6);
+    }
+
+    SECTION("the antipodal quaternion gives the same triple") {
+        const auto q = quaternionFromZyxDegrees(20.0, -10.0, 35.0);
+        const Eigen::Quaterniond negated{-q.w(), -q.x(), -q.y(), -q.z()};
+
+        REQUIRE((zyxDegreesFromQuaternion(q) - zyxDegreesFromQuaternion(negated)).norm() < 1e-9);
+    }
+
+    SECTION("elevation stays within +/-90 and the others within +/-180") {
+        for (double az : {-170.0, -30.0, 0.0, 45.0, 179.0}) {
+            for (double el : {-80.0, -20.0, 0.0, 20.0, 80.0}) {
+                for (double roll : {-160.0, 0.0, 120.0}) {
+                    const auto zyx =
+                            zyxDegreesFromQuaternion(quaternionFromZyxDegrees(az, el, roll));
+
+                    REQUIRE(std::abs(zyx.y()) <= 90.0 + 1e-9);
+                    REQUIRE(std::abs(zyx.x()) <= 180.0 + 1e-9);
+                    REQUIRE(std::abs(zyx.z()) <= 180.0 + 1e-9);
+                }
+            }
+        }
+    }
+
+    SECTION("gimbal lock puts the rotation in azimuth rather than splitting it") {
+        const auto q = quaternionFromZyxDegrees(0.0, 90.0, 0.0);
+        const auto zyx = zyxDegreesFromQuaternion(q);
+
+        REQUIRE(std::abs(zyx.y() - 90.0) < 1e-6);
+        REQUIRE(std::abs(zyx.z()) < 1e-6);   // roll pinned, not shared with azimuth
+    }
+}
+
 TEST_CASE("zyxDegreesFromQuaternion inverts quaternionFromZyxDegrees", "[rotation]") {
     // Round-trip through the representation probe_profiles actually stores, so
     // what the tool writes reproduces what it solved.
