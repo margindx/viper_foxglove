@@ -138,6 +138,59 @@ TEST_CASE("quality settings describe themselves for the log", "[device]") {
     }
 }
 
+TEST_CASE("a distortion summary reports what the capture saw", "[device][distortion]") {
+    SECTION("nothing captured") {
+        DistortionSummary empty;
+        REQUIRE(empty.mean() == 0.0);
+        REQUIRE_FALSE(empty.exceededThreshold());
+        REQUIRE(describeDistortion(empty) == "no frames seen");
+    }
+
+    SECTION("a clean capture") {
+        DistortionSummary clean;
+        clean.current = 2;
+        clean.peak = 5;
+        clean.sum = 300;
+        clean.frames = 200;
+
+        REQUIRE(clean.mean() == 1.5);
+        REQUIRE_FALSE(clean.exceededThreshold());
+
+        const auto described = describeDistortion(clean);
+        REQUIRE(described.find("peak 5/255") != std::string::npos);
+        REQUIRE(described.find("200 frames") != std::string::npos);
+        REQUIRE(described.find("above") == std::string::npos);
+    }
+
+    SECTION("a capture that went past the threshold is called out") {
+        // The point of tracking it: every capture gate measures geometry, so a
+        // distorted capture passes them all and this is the only signal.
+        DistortionSummary noisy;
+        noisy.peak = kDistortionWarnLevel + 20;
+        noisy.sum = 1000;
+        noisy.frames = 100;
+
+        REQUIRE(noisy.exceededThreshold());
+        REQUIRE(describeDistortion(noisy).find("above") != std::string::npos);
+    }
+
+    SECTION("exactly at the threshold counts as exceeded") {
+        DistortionSummary edge;
+        edge.peak = kDistortionWarnLevel;
+        REQUIRE(edge.exceededThreshold());
+    }
+
+    SECTION("the brief form carries current and peak") {
+        DistortionSummary summary;
+        summary.current = 7;
+        summary.peak = 19;
+
+        const auto brief = describeDistortionBrief(summary);
+        REQUIRE(brief.find("7") != std::string::npos);
+        REQUIRE(brief.find("19") != std::string::npos);
+    }
+}
+
 TEST_CASE("the distortion message carries the level and the count", "[device]") {
     const auto message = distortionMessage(97, 1, 250);
 

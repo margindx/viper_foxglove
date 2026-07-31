@@ -5,6 +5,7 @@
 #include "DeviceState.hpp"
 
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 
 namespace mdx {
@@ -152,6 +153,34 @@ std::string describeIncrement(const IncrementSettings &settings) {
     ss << "ON -- the device reports only after movement exceeding " << settings.positionThreshold
        << " (position) or " << settings.orientationThreshold
        << " (orientation), so the stream is deliberately irregular rather than dropping frames";
+
+    return ss.str();
+}
+
+double DistortionSummary::mean() const {
+    return frames > 0 ? static_cast<double>(sum) / static_cast<double>(frames) : 0.0;
+}
+
+bool DistortionSummary::exceededThreshold() const {
+    return peak >= kDistortionWarnLevel;
+}
+
+std::string describeDistortionBrief(const DistortionSummary &summary) {
+    std::ostringstream ss;
+    ss << "dist " << summary.current << " (peak " << summary.peak << ")";
+    return ss.str();
+}
+
+std::string describeDistortion(const DistortionSummary &summary) {
+    if (summary.frames == 0)
+        return "no frames seen";
+
+    std::ostringstream ss;
+    ss << "peak " << summary.peak << "/255, mean " << std::fixed << std::setprecision(1)
+       << summary.mean() << " over " << summary.frames << " frames";
+
+    if (summary.exceededThreshold())
+        ss << "  <-- above " << kDistortionWarnLevel;
 
     return ss.str();
 }

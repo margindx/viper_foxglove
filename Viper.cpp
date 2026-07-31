@@ -362,6 +362,10 @@ void Viper::monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t fram
     lastFrameCounter_ = frameCounter;
     haveFrameCounter_ = true;
 
+    // Worst level across the sensors in this frame, accumulated so a caller can
+    // ask what the signal was like over a window it defines.
+    uint32_t worstDistortion = 0;
+
     for (uint32_t i = 0; i < nSensors; i++) {
         const SENFRAMEDATA *pfd = pfd_all + i;
 
@@ -379,12 +383,22 @@ void Viper::monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t fram
         }
 
         const uint32_t distortion = pfd->SFinfo.bfDistortion;
+        worstDistortion = std::max(worstDistortion, distortion);
+
         if (distortion >= mdx::kDistortionWarnLevel) {
             if ((++distortedFrames_ % 200) == 1) {
                 fgInterface_->logWarning(
                         mdx::distortionMessage(distortion, static_cast<int>(i), distortedFrames_));
             }
         }
+    }
+
+    if (nSensors > 0) {
+        std::lock_guard<std::mutex> guard{distortionMtx_};
+        distortion_.current = worstDistortion;
+        distortion_.peak = std::max(distortion_.peak, worstDistortion);
+        distortion_.sum += worstDistortion;
+        distortion_.frames++;
     }
 }
 

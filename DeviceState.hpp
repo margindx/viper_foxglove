@@ -89,6 +89,30 @@ constexpr std::uint32_t kDistortionWarnLevel = 32;
 
 std::string distortionMessage(std::uint32_t level, int sensor, std::uint64_t framesAffected);
 
+/// Distortion seen over some window of frames -- one calibration step, say.
+///
+/// Kept because the capture gates measure geometry only: spread, conditioning
+/// and sample count say nothing about signal quality, so a capture taken wholly
+/// inside a distorted field passes every check and yields a confident wrong
+/// answer. This is what lets the operator see that while it is happening, and
+/// what puts it next to the residuals afterwards.
+struct DistortionSummary {
+    /// Worst level across sensors in the most recent frame.
+    std::uint32_t current{0};
+    std::uint32_t peak{0};
+    std::uint64_t sum{0};
+    std::uint64_t frames{0};
+
+    double mean() const;
+    bool exceededThreshold() const;
+};
+
+/// Compact form for the live capture line, e.g. "dist 3 (peak 12)".
+std::string describeDistortionBrief(const DistortionSummary &summary);
+
+/// Fuller form for the result block, e.g. "peak 41/255, mean 12.3 over 1820 frames".
+std::string describeDistortion(const DistortionSummary &summary);
+
 } // namespace mdx
 
 #endif //VIPER_DEVICESTATE_HPP

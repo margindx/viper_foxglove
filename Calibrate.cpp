@@ -4,6 +4,7 @@
 
 #include "Calibrate.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <ctime>
@@ -14,6 +15,8 @@
 #include <optional>
 #include <sstream>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -113,7 +116,8 @@ std::vector<ProbeProfile> loadProfilesIfPresent(const std::string &configPath) {
 ///
 /// Looped rather than recursive: an operator restarting a difficult step many
 /// times should not grow the stack.
-bool captureStep(CalibrationSession &session, Viper &viper) {
+bool captureStep(CalibrationSession &session, Viper &viper,
+                 mdx::DistortionSummary &distortionOut) {
     const auto info = session.currentStep();
 
     std::cout << "\n=== " << info.title << " ===\n" << info.instructions << "\n\n";
@@ -142,6 +146,10 @@ bool captureStep(CalibrationSession &session, Viper &viper) {
                      "or type 'r' then Enter to restart this step, or 'q' to abort.\n\n"
                   << std::flush;
 
+        // Distortion is bounded to this capture, so the figure reported beside
+        // the residuals belongs to the data that produced them.
+        viper.resetDistortion();
+
         // Poll on a worker so the operator's Enter is not queued behind a sleep.
         std::atomic_bool capturing{true};
         std::thread poller{[&] {
@@ -158,6 +166,7 @@ bool captureStep(CalibrationSession &session, Viper &viper) {
 
                     std::ostringstream line;
                     line << "\r  " << metrics.sampleCount << " samples";
+                    line << " | " << mdx::describeDistortionBrief(viper.distortionSummary());
                     if (metrics.coneHalfAngleDeg > 0.0)
                         line << " | spread " << static_cast<int>(metrics.coneHalfAngleDeg)
                              << " deg";
@@ -181,6 +190,7 @@ bool captureStep(CalibrationSession &session, Viper &viper) {
         // reads or mutates state the poller was writing.
         capturing = false;
         poller.join();
+        distortionOut = viper.distortionSummary();
         std::cout << "\n";
 
         if (!gotLine || answer == "q" || answer == "Q")
@@ -201,7 +211,8 @@ bool captureStep(CalibrationSession &session, Viper &viper) {
     }
 }
 
-void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
+void reportOutcome(const CalibrationOutcome &outcome, int sensorCount,
+                   const std::vector<std::pair<std::string, mdx::DistortionSummary>> &distortion) {
     std::cout << "\n=== Result for " << sensorCount << " sensor"
               << (sensorCount == 1 ? "" : "s") << " ===\n";
 
@@ -278,6 +289,26 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount) {
         }
     } else {
         std::cout << "\n  Independent plane-constraint check unavailable for this capture.\n";
+    }
+
+    if (!distortion.empty()) {
+        std::cout << "\n  EM distortion during capture:\n";
+        for (const auto &entry : distortion) {
+            std::cout << "    " << std::left << std::setw(22) << entry.first << std::right
+                      << mdx::describeDistortion(entry.second) << "\n";
+        }
+
+        const bool anyExceeded = std::any_of(
+                distortion.begin(), distortion.end(),
+                [](const auto &entry) { return entry.second.exceededThreshold(); });
+
+        if (anyExceeded) {
+            std::cout << "    WARNING: distortion degrades position and orientation directly, and "
+                         "the capture\n             gates cannot see it -- spread, conditioning "
+                         "and sample count are all\n             geometry. A well-conditioned "
+                         "solve with a large residual is what this\n             looks like. Move "
+                         "away from metal, motors and displays and recapture.\n";
+        }
     }
 
     if (outcome.tipRotation.has_value()) {
@@ -369,17 +400,23 @@ int runCalibration(const std::string &configPath) {
 
     CalibrationSession session;
 
+    std::vector<std::pair<std::string, mdx::DistortionSummary>> distortionPerStep;
+
     while (session.step() != CalibrationStep::Done) {
         if (viper.hasFatalError()) {
             std::cerr << "\nAborting: " << viper.fatalErrorMessage() << "\n";
             return 1;
         }
 
-        if (!captureStep(session, viper)) {
+        const auto title = session.currentStep().title;
+        mdx::DistortionSummary stepDistortion;
+
+        if (!captureStep(session, viper, stepDistortion)) {
             std::cout << "Aborted; nothing was written.\n";
             return 0;
         }
 
+        distortionPerStep.emplace_back(title, stepDistortion);
         session.advance();
     }
 
@@ -420,7 +457,7 @@ int runCalibration(const std::string &configPath) {
         return 1;
     }
 
-    reportOutcome(*outcome, sensorCount);
+    reportOutcome(*outcome, sensorCount, distortionPerStep);
 
     if (existing.has_value()) {
         const double delta = (outcome->tipOffset - existing->tipOffsetM).norm();
@@ -429,6 +466,21 @@ int runCalibration(const std::string &configPath) {
         if (delta > 0.010) {
             std::cout << "  WARNING: that is a large change against a previously trusted value. "
                          "Check the\n           hardware and the capture before accepting it.\n";
+        }
+    }
+
+    // Distortion is invisible to every gate the capture applies, so accepting a
+    // result taken in a distorted field is a decision rather than an oversight.
+    const bool distorted = std::any_of(
+            distortionPerStep.begin(), distortionPerStep.end(),
+            [](const auto &entry) { return entry.second.exceededThreshold(); });
+
+    if (distorted) {
+        std::cout << "\n";
+        if (!confirmed("EM distortion exceeded the warning level during capture. "
+                       "Use this result anyway?")) {
+            std::cout << "Not written. Move away from metal and recapture.\n";
+            return 0;
         }
     }
 

@@ -155,6 +155,12 @@ Three fields arrive in every frame and are checked rather than discarded:
 - **Distortion** (`SFinfo.bfDistortion`, 0–255) — EM distortion degrades position and orientation directly and
   is otherwise invisible. A rate-limited warning is logged above a threshold. That threshold is a guess, not a
   measured limit, and wants tuning against a rig known to be clean.
+
+  Calibration surfaces it as well, because none of its capture gates can: spread, condition number and sample
+  count are all measures of *geometry*, so a capture taken wholly inside a distorted field passes every one of
+  them and yields a confident, well-conditioned, wrong answer. The live capture line shows the current and peak
+  level, the result block reports peak and mean per step beside the residuals, and a capture whose peak went
+  above the threshold needs an extra confirmation before it can be written.
 - **The frame counter** — gaps are the direct evidence of dropped data that an unexplained publish rate only
   hints at. Counted and reported, with backwards or very large jumps treated as a counter reset rather than a
   drop.

@@ -94,6 +94,11 @@ protected:
     /// Frames seen above the distortion warning level.
     uint64_t distortedFrames_ = 0;
 
+    /// Distortion accumulated since the last reset, so a caller can bound it to
+    /// a window of its own choosing -- one calibration step, for instance.
+    std::mutex distortionMtx_;
+    mdx::DistortionSummary distortion_;
+
     /// Calibration runs before a probe has a profile, so the usual "no profile"
     /// complaint is expected there rather than a fault.
     bool calibrationMode_ = false;
@@ -257,6 +262,18 @@ public:
     std::optional<mdx::Pose> latestFusedPose() {
         std::lock_guard<std::mutex> guard{fusedPoseMtx_};
         return latestFusedPose_;
+    }
+
+    /// Distortion since the last resetDistortion(). Safe to call from any thread.
+    mdx::DistortionSummary distortionSummary() {
+        std::lock_guard<std::mutex> guard{distortionMtx_};
+        return distortion_;
+    }
+
+    /// Start a fresh distortion window.
+    void resetDistortion() {
+        std::lock_guard<std::mutex> guard{distortionMtx_};
+        distortion_ = mdx::DistortionSummary{};
     }
 
     /// Sensor count from the most recent frame, or -1 before any has arrived.
