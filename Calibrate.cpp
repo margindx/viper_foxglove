@@ -391,12 +391,13 @@ int runCalibration(const std::string &configPath) {
     // already fixed by step 1.
     double bodyFlatRollDeg = 0.0;
     {
-        std::cout << "\nStep 2 measured that side's normal. To turn that into the\n"
+        std::cout << "\nStep 2 measured the normal of the 4-screw side. To turn that into the\n"
                      "footprint's orientation I need the angle between them, about the probe\n"
-                     "axis, from the probe's design. Often 0 or 90.\n";
+                     "axis, from the probe's design. Often 0 or 90. Measure it with the\n"
+                     "4-screw side down, since that is the side the capture used.\n";
 
         std::string answer;
-        if (!prompt("Angle from that side's normal to the footprint long axis, in degrees "
+        if (!prompt("Angle from the 4-screw side's normal to the footprint long axis, degrees "
                     "[0]: ",
                     answer)) {
             std::cout << "Aborted; nothing was written.\n";

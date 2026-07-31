@@ -59,8 +59,12 @@ StepInfo describeStep(CalibrationStep step) {
         case CalibrationStep::BodyFlat:
             return {step, "2 of 2: body side",
                     "The probe body is oval in cross-section, with two opposite sides flatter "
-                    "than the rest. Lay the probe down so one of those flatter sides rests on "
-                    "the surface, and let it settle.\n"
+                    "than the rest. One shows 4 screws, the other 6. Lay the probe down with "
+                    "the 4-SCREW side against the surface, and let it settle.\n"
+                    "\n"
+                    "Which side goes down decides the roll of the answer, and the two differ by "
+                    "half a turn. Using the 6-screw side, or changing sides part way through, "
+                    "gives a result that looks equally plausible and is 180 degrees out.\n"
                     "\n"
                     "Keeping that side on the surface the whole time, turn the probe slowly "
                     "through a full circle, as though sweeping a clock hand around. Do not lift "
@@ -72,11 +76,11 @@ StepInfo describeStep(CalibrationStep step) {
                     "\n"
                     "Use the same surface as step 1.\n"
                     "\n"
-                    "       viewed from above:\n"
+                    "       viewed from above, 4-screw side down:\n"
                     "\n"
                     "         ,------------------.\n"
                     "         | S            lens|      turn slowly through a full\n"
-                    "         `------------------'      circle, keeping the same\n"
+                    "         `------------------'      circle, keeping the 4-screw\n"
                     "                                   side down throughout"};
 
         case CalibrationStep::Done:
@@ -199,8 +203,25 @@ std::optional<CalibrationOutcome> CalibrationSession::solve(double bodyFlatRollD
 
     const Eigen::Vector3d probeAxis = pivot->tipOffset.normalized();
 
+    // solveCommonDirection's pair comes from a singular vector, so its sign is
+    // arbitrary and the same capture could yield (v, n) or (-v, -n) -- a 180
+    // degree difference in the roll it produces. Anchor it to which way is up,
+    // which the pivot knows: the tip rested on the surface and the probe leaned
+    // up out of it.
+    //
+    // This makes one capture give one answer. It does not decide which of the
+    // probe's two flatter sides was face down: those genuinely differ by 180
+    // degrees about the probe axis, and only the instruction to always rest the
+    // same named side settles that.
+    if (const auto up = estimateUpFromPivot(pivotSamples_, pivot->tipOffset)) {
+        if (outcome.bodyFlat.worldDirection.dot(*up) < 0.0) {
+            outcome.bodyFlat.sensorDirection = -outcome.bodyFlat.sensorDirection;
+            outcome.bodyFlat.worldDirection = -outcome.bodyFlat.worldDirection;
+        }
+    }
+
     outcome.tipRotation =
-            tipRotationFromAxes(probeAxis, bodyFlat->sensorDirection, bodyFlatRollDeg);
+            tipRotationFromAxes(probeAxis, outcome.bodyFlat.sensorDirection, bodyFlatRollDeg);
     if (outcome.tipRotation.has_value())
         outcome.rotationFromIdentityDeg = rotationAngleDeg(*outcome.tipRotation);
 
@@ -209,7 +230,7 @@ std::optional<CalibrationOutcome> CalibrationSession::solve(double bodyFlatRollD
     // so agreement is meaningful.
     // The world direction from step 2 is the surface normal, since the flat was
     // laid on the same surface the tip was pivoted on.
-    outcome.planeCheck = solvePlaneTranslation(pivotSamples_, bodyFlat->worldDirection);
+    outcome.planeCheck = solvePlaneTranslation(pivotSamples_, outcome.bodyFlat.worldDirection);
     if (outcome.planeCheck.has_value()) {
         outcome.offsetDisagreementM =
                 (outcome.planeCheck->tipOffset - outcome.tipOffset).norm();

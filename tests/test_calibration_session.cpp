@@ -231,6 +231,34 @@ TEST_CASE("a completed session recovers the known transform", "[session][solve]"
     }
 }
 
+TEST_CASE("the recovered side normal is anchored to physical up", "[session][solve][regression]") {
+    // solveCommonDirection takes its pair from a singular vector, whose sign is
+    // arbitrary, so without an anchor the same capture could produce a roll 180
+    // degrees out from one run to the next. The pivot knows which way is up --
+    // the tip rested on the surface and the probe leaned out of it -- so the
+    // recovered direction must map onto that, not away from it.
+    const auto session = completeSession();
+    const auto outcome = session.solve();
+
+    REQUIRE(outcome.has_value());
+
+    const auto up = estimateUpFromPivot(
+            std::vector<CalibrationSample>{}, Eigen::Vector3d::UnitX());
+    REQUIRE_FALSE(up.has_value());   // nothing to estimate from
+
+    // The surface normal the capture recovered points the same way as up, not
+    // the opposite way.
+    REQUIRE(outcome->bodyFlat.worldDirection.dot(kSurfaceNormal) > 0.9);
+}
+
+TEST_CASE("estimateUpFromPivot refuses what it cannot use", "[solve][negative]") {
+    REQUIRE_FALSE(estimateUpFromPivot({}, Eigen::Vector3d::UnitX()).has_value());
+
+    std::vector<CalibrationSample> samples{
+            makePose({0, 0, 0}, Eigen::Quaterniond::Identity())};
+    REQUIRE_FALSE(estimateUpFromPivot(samples, Eigen::Vector3d::Zero()).has_value());
+}
+
 TEST_CASE("an incomplete session does not solve", "[session][solve]") {
     CalibrationSession session;
     feedRockingCapture(session);

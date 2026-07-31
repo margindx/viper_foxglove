@@ -198,6 +198,21 @@ std::optional<Eigen::Quaterniond> tipRotationFromAxes(const Eigen::Vector3d &fac
                                                       const Eigen::Vector3d &inPlaneReferenceSensor,
                                                       double rollOffsetDeg = 0.0);
 
+/// Estimate which way is up, in tracker coordinates, from a pivot capture.
+///
+/// During the pivot the tip rests on the surface and the probe leans up out of
+/// it, so the tip-to-sensor vector -R_i*t points upwards however the probe is
+/// tilted. Averaging it over the sweep gives the surface normal's sense.
+///
+/// This exists to anchor a sign. solveCommonDirection returns its pair of
+/// directions from a singular vector, whose sign is arbitrary, so the same
+/// capture could yield either (v, n) or (-v, -n). Knowing which way up is turns
+/// that into one answer.
+///
+/// Returns nullopt when the samples are unusable or cancel out.
+std::optional<Eigen::Vector3d> estimateUpFromPivot(const std::vector<CalibrationSample> &samples,
+                                                   const Eigen::Vector3d &tipOffset);
+
 /// Angle of a rotation, degrees -- used to report how far a solved tip rotation
 /// sits from identity, so a correction that is really just noise can be seen
 /// for what it is.

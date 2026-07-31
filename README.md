@@ -238,7 +238,7 @@ This is a **bench procedure**, run at the machine the Viper is attached to. Unli
 **not** require an existing `probe_profiles` entry for the connected sensor count — producing that entry is
 the point, so a probe can be calibrated for the first time. It writes to the same config file it read.
 
-You need a flat surface. The probe rests on one of the flatter sides of its body for the second step. There are
+You need a flat surface. The probe rests on the 4-screw side of its body for the second step. There are
 two captures, and the program will not let you leave one until the data can actually support a solve — it
 shows live what is still missing. Nothing is sampled until you have read the step and pressed Enter, so you
 can get the probe into position first.
@@ -277,10 +277,14 @@ STEP 1 — lens pivot                   STEP 2 — body side
    on its axis, so the sensor-to-lens vector *is* that axis. Nothing needs to be captured for it, which is why
    there is no step that stands the probe on its lens.
 
-2. **Body side.** The probe body is oval in cross-section, with two opposite sides flatter than the rest. Lay
-   the probe down so one of those flatter sides rests on the surface, and let it settle. Then, keeping that
-   side on the surface the whole time, turn the probe slowly through a full circle, as though sweeping a clock
-   hand around.
+2. **Body side.** The probe body is oval in cross-section, with two opposite sides flatter than the rest. One
+   shows **4 screws**, the other 6. Lay the probe down with the **4-screw side** against the surface, and let
+   it settle. Then, keeping that side on the surface the whole time, turn the probe slowly through a full
+   circle, as though sweeping a clock hand around.
+
+   **Which side goes down decides the roll**, and the two differ by half a turn. Using the 6-screw side, or
+   swapping part way through, produces a result that looks equally plausible and is 180° out. Nothing in the
+   data can tell the two apart, which is why the side is named rather than left to choice.
 
    Two cautions, both of which corrupt the result rather than merely slowing it down:
 
@@ -293,7 +297,7 @@ STEP 1 — lens pivot                   STEP 2 — body side
    along the body is a far more stable angular reference than balancing the probe on its lens.
 
    Because the recovered direction is that side's normal rather than the footprint's long axis, the program
-   then asks for the angle between the two, measured about the probe axis. That is a property of the probe's
+   then asks for the angle between the two, measured about the probe axis with the 4-screw side down. That is a property of the probe's
    design and comes from CAD, not from the capture — commonly `0` or `90` degrees. It affects only roll; the
    tip position is already fixed by step 1.
 

@@ -69,6 +69,27 @@ double conditionFrom(const Eigen::VectorXd &singularValues) {
 
 } // namespace
 
+std::optional<Eigen::Vector3d> estimateUpFromPivot(const std::vector<CalibrationSample> &samples,
+                                                   const Eigen::Vector3d &tipOffset) {
+    if (samples.empty() || !allUsable(samples))
+        return std::nullopt;
+
+    if (!tipOffset.allFinite() || !(tipOffset.norm() > 1e-9))
+        return std::nullopt;
+
+    const Eigen::Vector3d offsetDirection = tipOffset.normalized();
+
+    // p_tip = p_sensor + R_i*t, so -R_i*t runs from the tip up to the sensor.
+    Eigen::Vector3d sum = Eigen::Vector3d::Zero();
+    for (const auto &sample : samples)
+        sum -= sample.orientation.normalized() * offsetDirection;
+
+    if (!(sum.norm() > 1e-9))
+        return std::nullopt;   // the sweep spanned more than a hemisphere
+
+    return sum.normalized();
+}
+
 double rotationAngleDeg(const Eigen::Quaterniond &q) {
     const Eigen::Quaterniond n = q.normalized();
     // Fold to the shorter of the two equivalent rotations.
