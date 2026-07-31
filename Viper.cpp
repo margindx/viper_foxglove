@@ -246,17 +246,21 @@ void Viper::readDeviceState(uint32_t nSensors) {
             note("boresight" + label);
         }
 
+        // ---- Settings that change latency and cadence but not geometry.
+        //
+        // The sensor origin is recorded here rather than gated. It selects
+        // which source a sensor references, which this program was refusing to
+        // run on -- but that is a deliberate configuration choice on a rig that
+        // may have reason to use it, and stopping the run over it was not ours
+        // to make. Logged so the recording still carries the value.
         uint32_t origin = 0;
         if (queryConfig(CMD_SNS_ORIGIN, sensor, &origin, sizeof(origin))) {
-            if (!mdx::isDefaultSensorOrigin(origin)) {
-                raiseFatalError(mdx::sensorOriginMessage(static_cast<int>(sensor), origin));
-                return;
-            }
+            fgInterface_->logInfo("Sensor origin" + label + ": " +
+                                  mdx::sensorOriginLabel(origin));
         } else {
             note("sensor origin" + label);
         }
 
-        // ---- Settings that change latency and cadence but not geometry.
         FILTER_CONFIG filter{};
         if (queryConfig(CMD_FILTER, sensor, &filter, sizeof(filter))) {
             mdx::FilterSettings settings;

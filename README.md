@@ -137,13 +137,16 @@ on top of them and the result looks like a mounting fault rather than a configur
 | --- | --- |
 | `CMD_TIP_OFFSET` | the device has already displaced positions to a tip; `tip_offset_m` is then added again |
 | `CMD_BORESIGHT` | orientations are pre-rotated, so the tip offset is applied along a rotated frame |
-| `CMD_SNS_ORIGIN` | the sensor reports about a different origin than the published frames assume |
 | `CMD_SRC_ROTATION` | the whole tracker frame is rotated |
 
 **Settings that affect latency or cadence are logged, not gated**: `CMD_FILTER`, `CMD_PREDFILTER_CFG` and
 `_EXT`, `CMD_FRAMERATE`, `CMD_INCREMENT`, and `CMD_WHOAMI` (device, serial, firmware). Increment mode is worth
 noticing — it makes the device report only after a movement threshold, which presents as an irregular stream
 rather than as an error.
+
+`CMD_SNS_ORIGIN` is logged rather than gated too. It selects which source a sensor references, and this
+program used to refuse to start unless it was the default — but a rig may have a reason to set it, and that
+call belongs to whoever configured the rig. The value still reaches `/viper/log`, so a recording carries it.
 
 A setting the device declines to report is logged as **unverified** rather than assumed safe. Failing to read
 a setting is not evidence that it is unset.

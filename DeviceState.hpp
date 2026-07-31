@@ -45,8 +45,9 @@ struct DeviceRotation {
     std::string describe() const;
 };
 
-/// True when the sensor reports about its default origin (SNS_ORIG_SRC1).
-bool isDefaultSensorOrigin(std::uint32_t mode);
+/// "source 1 (default)", "common", or the raw code when it is outside
+/// eSensorOriginMode. Reported rather than gated: which source a sensor
+/// references is a deliberate choice on rigs that have a reason to change it.
 std::string sensorOriginLabel(std::uint32_t mode);
 
 /// "240 Hz", or the raw code when it is outside eViperFrameRate.
@@ -56,7 +57,6 @@ std::string frameRateLabel(std::uint32_t code);
 /// how to clear it.
 std::string boresightMessage(int sensor, const DeviceRotation &rotation);
 std::string sourceRotationMessage(int source, const DeviceRotation &rotation);
-std::string sensorOriginMessage(int sensor, std::uint32_t mode);
 
 struct FilterSettings {
     std::uint32_t level{0};

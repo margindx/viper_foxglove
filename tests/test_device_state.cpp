@@ -55,11 +55,9 @@ TEST_CASE("a non-finite rotation is never neutral", "[device][negative]") {
     REQUIRE_FALSE(rotation(std::numeric_limits<double>::infinity(), 0, 0, 0).isNeutral());
 }
 
-TEST_CASE("sensor origin defaults to source 1", "[device]") {
-    REQUIRE(isDefaultSensorOrigin(0));
-    REQUIRE_FALSE(isDefaultSensorOrigin(1));
-    REQUIRE_FALSE(isDefaultSensorOrigin(4));
-
+// Labelled for the log, not gated: a rig may have a reason to reference a
+// different source, and refusing to run over it was not this program's call.
+TEST_CASE("sensor origin is named for the record", "[device]") {
     REQUIRE(sensorOriginLabel(0).find("default") != std::string::npos);
     REQUIRE(sensorOriginLabel(4) == "common");
     REQUIRE(sensorOriginLabel(99).find("unrecognized") != std::string::npos);
@@ -88,13 +86,6 @@ TEST_CASE("refusal messages say what was found and how to clear it", "[device]")
 
         REQUIRE(message.find("CMD_SRC_ROTATION") != std::string::npos);
         REQUIRE(message.find("tracker frame") != std::string::npos);
-    }
-
-    SECTION("sensor origin") {
-        const auto message = sensorOriginMessage(2, 4);
-
-        REQUIRE(message.find("common") != std::string::npos);
-        REQUIRE(message.find("CMD_SNS_ORIGIN") != std::string::npos);
     }
 }
 

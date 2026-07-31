@@ -52,10 +52,6 @@ std::string DeviceRotation::describe() const {
     return joinParams(params);
 }
 
-bool isDefaultSensorOrigin(std::uint32_t mode) {
-    return mode == 0;   // SNS_ORIG_SRC1
-}
-
 std::string sensorOriginLabel(std::uint32_t mode) {
     switch (mode) {
         case 0: return "source 1 (default)";
@@ -103,16 +99,6 @@ std::string sourceRotationMessage(int source, const DeviceRotation &rotation) {
           "an axis system other than the source's own and every downstream frame -- /tf/viper, "
           "the point clouds, the tip pose -- means something different from what it says. Clear "
           "it (CMD_SRC_ROTATION reset).";
-
-    return ss.str();
-}
-
-std::string sensorOriginMessage(int sensor, std::uint32_t mode) {
-    std::ostringstream ss;
-    ss << "Sensor " << sensor << " is configured to report about " << sensorOriginLabel(mode)
-       << " rather than its default origin. Positions from it are then relative to a different "
-          "reference than the other sensors and than the published frames assume. Clear it "
-          "(CMD_SNS_ORIGIN reset).";
 
     return ss.str();
 }
