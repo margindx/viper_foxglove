@@ -189,6 +189,20 @@ sensors to the Viper SEU. `probe_profiles` maps one to the other:
 | `tip_rotation_zyx_deg` | `[az, el, roll]` | no | Rotation from the sensor frame to the tip frame, in degrees, using the Viper's own Z-Y-X (azimuth / elevation / roll) convention. Omit for identity. |
 | `label` | string | no | Name echoed to the log when the profile is selected. |
 
+`tip_offset_m` and `tip_rotation_zyx_deg` both say which way along the sensor the probe points, and they are
+checked against each other at startup: the tip frame's +x is the along-probe direction by convention, so the
+offset must lie along it. A profile where they disagree by more than 30° is a startup error.
+
+This catches a specific and otherwise silent mistake. If a sensor is mounted with its +x pointing away from
+the tip, negating `tip_offset_m` puts the tip in the right place — but leaves the published orientation facing
+backwards, which reverses the drawn probe geometry and every point-cloud normal taken from it. The position
+looks correct throughout, so nothing else would report it. The rotation has to be negated too: a straight
+reversal is `"tip_rotation_zyx_deg": [180.0, 0.0, 0.0]`, and the exact value including roll is what
+`viper --calibrate` solves for.
+
+The 30° tolerance is deliberately loose. It is there to catch a reversed sign or a swapped axis, not to police
+the couple of degrees of slop a real calibration leaves when the tip is not perfectly on the probe's axis.
+
 #### Switching between probes
 
 **Switching probes means changing what is plugged in. Nothing in the config needs editing to switch.**

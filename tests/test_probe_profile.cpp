@@ -325,6 +325,74 @@ TEST_CASE("parseProbeProfiles accepts a well-formed config", "[parse]") {
     REQUIRE(profiles[1].sensorCount == 1);
 }
 
+TEST_CASE("the tip offset and tip rotation must agree on the probe direction", "[parse][consistency]") {
+    auto parseText = [](const char *text) {
+        return parseProbeProfiles(nlohmann::json::parse(text));
+    };
+
+    SECTION("offset along +x with no rotation is consistent") {
+        REQUIRE(parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[0.194,0,0]}]})")
+                        .size() == 1);
+    }
+
+    SECTION("a negated offset without a matching rotation is refused") {
+        // The real case this exists for: the sensor is mounted with its +x
+        // pointing away from the tip, someone negates the offset, and the
+        // position then looks right while the published orientation -- and
+        // every normal drawn from it -- faces backwards.
+        REQUIRE_THROWS_AS(parseText(R"({"probe_profiles":[
+                              {"sensor_count":1,"tip_offset_m":[-0.194,0,0]}]})"),
+                          std::runtime_error);
+
+        REQUIRE_THROWS_AS(parseText(R"({"probe_profiles":[
+                              {"sensor_count":1,"tip_offset_m":[-0.194,0,0],
+                               "tip_rotation_zyx_deg":[0,0,0]}]})"),
+                          std::runtime_error);
+    }
+
+    SECTION("a negated offset with the matching reversal is accepted") {
+        const auto profiles = parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[-0.194,0,0],
+                     "tip_rotation_zyx_deg":[180.0,0.0,0.0]}]})");
+
+        REQUIRE(profiles.size() == 1);
+    }
+
+    SECTION("an axis swap is refused") {
+        REQUIRE_THROWS_AS(parseText(R"({"probe_profiles":[
+                              {"sensor_count":1,"tip_offset_m":[0,0.194,0]}]})"),
+                          std::runtime_error);
+    }
+
+    SECTION("the slop a real calibration leaves is tolerated") {
+        // solvePointPivot returns a free vector, so the tip is never exactly on
+        // the probe axis. A couple of degrees must not be treated as a fault.
+        REQUIRE(parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[0.1814,0.004,-0.002]}]})")
+                        .size() == 1);
+    }
+
+    SECTION("a zero offset has no direction to check") {
+        REQUIRE(parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[0,0,0]}]})")
+                        .size() == 1);
+    }
+
+    SECTION("the message says what breaks and how to fix it") {
+        try {
+            parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[-0.194,0,0]}]})");
+            REQUIRE(false);
+        } catch (const std::runtime_error &e) {
+            const std::string message = e.what();
+            REQUIRE(message.find("180") != std::string::npos);
+            REQUIRE(message.find("normal") != std::string::npos);
+            REQUIRE(message.find("--calibrate") != std::string::npos);
+        }
+    }
+}
+
 TEST_CASE("parseProbeProfiles rejects malformed configs", "[parse]") {
     auto parseText = [](const char *text) {
         return parseProbeProfiles(nlohmann::json::parse(text));
