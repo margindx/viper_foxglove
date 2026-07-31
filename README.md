@@ -275,9 +275,16 @@ STEP 1 — lens pivot                   STEP 2 — body side
 
    Rocking on one edge only tilts in a single plane, and a sweep confined to one plane is ill-conditioned
    however long you run it — hence the varied headings. The reason to prefer them over the short edge is
-   contact migration: the lens centre is the datum being solved for, and it sits 0.5 mm from the long edge but
+   contact migration: the lens center is the datum being solved for, and it sits 0.5 mm from the long edge but
    5 mm from the short one, so rocking on the short edge displaces the datum ten times as far. Keep it in
    reserve for when the varied headings alone do not satisfy the gate.
+
+   The prompt will not let a single-heading capture through, but it used to. The spread figure alone cannot
+   tell the two apart — rocking 25 degrees in one plane reports the same 25 degrees a varied sweep does — so
+   the condition number is the only thing separating them, and its bound was loose enough to pass a planar
+   capture that misplaces the tip by millimeters. The live line now shows spread as two numbers, `26/9 deg`:
+   how far the probe was tilted, and how much of that was in some direction other than the dominant one. The
+   second number stays near zero until you turn to a new heading.
 
    This solves the tip offset. It also gives the probe axis for free — the probe is straight and the lens lies
    on its axis, so the sensor-to-lens vector *is* that axis. Nothing needs to be captured for it, which is why

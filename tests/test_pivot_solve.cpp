@@ -192,6 +192,61 @@ TEST_CASE("capture assessment guides an inadequate sweep", "[diversity]") {
     }
 }
 
+// The case that reached the bench: an operator rocked the probe back and forth
+// at one heading and was told the capture was sufficient while still on that
+// first rock. Cone spread cannot see it -- rocking 25 degrees in one plane
+// reports the same 25 degrees a proper conical sweep does -- so the condition
+// number is the only thing standing between a planar capture and a confident
+// wrong answer, and at the original bound of 100 it let one through.
+TEST_CASE("rocking at a single heading is refused", "[diversity][negative]") {
+    const Eigen::Vector3d tipOffset{0.194, 0, 0};
+    const Eigen::Vector3d pivot{0.2, -0.1, 0.4};
+
+    // Tilts about one axis only, with a couple of degrees of hand wobble --
+    // without the wobble the system is exactly singular and any bound rejects
+    // it. The wobble is what made this pass.
+    std::vector<CalibrationSample> planar;
+    for (int i = 0; i < 120; i++) {
+        const double rock = 25.0 * kDeg * std::sin(i * 0.11);
+        const double wobbleA = 2.0 * kDeg * std::sin(i * 0.37 + 1.0);
+        const double wobbleB = 2.0 * kDeg * std::sin(i * 0.53 + 2.0);
+        const Eigen::Quaterniond q =
+                Eigen::Quaterniond{Eigen::AngleAxisd(rock, Eigen::Vector3d::UnitY())} *
+                Eigen::Quaterniond{Eigen::AngleAxisd(wobbleA, Eigen::Vector3d::UnitZ())} *
+                Eigen::Quaterniond{Eigen::AngleAxisd(wobbleB, Eigen::Vector3d::UnitX())};
+        planar.push_back(makeSample(pivot - q.normalized() * tipOffset, q));
+    }
+
+    const auto metrics = assessCapture(planar);
+
+    // Everything the operator can see says the capture is going well.
+    REQUIRE(metrics.sampleCount > 40);
+    REQUIRE(metrics.coneHalfAngleDeg > 20.0);
+
+    REQUIRE_FALSE(metrics.sufficient);
+    REQUIRE(metrics.conditionNumber > 20.0);
+
+    // The tilts are wide but all in one direction, and the guidance says to
+    // turn to a new heading rather than to tilt further.
+    REQUIRE(metrics.secondarySpreadDeg < 5.0);
+    REQUIRE(metrics.guidance.find("heading") != std::string::npos);
+
+    // A second heading is enough to fix it, and is what the guidance asks for.
+    std::vector<CalibrationSample> varied = planar;
+    for (int i = 0; i < 120; i++) {
+        const double rock = 25.0 * kDeg * std::sin(i * 0.11);
+        const Eigen::Quaterniond q =
+                Eigen::Quaterniond{Eigen::AngleAxisd(90.0 * kDeg, Eigen::Vector3d::UnitX())} *
+                Eigen::Quaterniond{Eigen::AngleAxisd(rock, Eigen::Vector3d::UnitY())};
+        varied.push_back(makeSample(pivot - q.normalized() * tipOffset, q));
+    }
+
+    const auto better = assessCapture(varied);
+    REQUIRE(better.secondarySpreadDeg > 5.0);
+    REQUIRE(better.conditionNumber < metrics.conditionNumber);
+    REQUIRE(better.sufficient);
+}
+
 TEST_CASE("direction capture is judged on spin, not tilt", "[diversity][direction]") {
     const Eigen::Vector3d faceNormalSensor = Eigen::Vector3d::UnitX();
     const Eigen::Vector3d surfaceNormal = Eigen::Vector3d::UnitZ();

@@ -5,6 +5,7 @@
 #include "PivotSolve.hpp"
 
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 
 namespace mdx {
@@ -168,10 +169,29 @@ DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
             widest = std::max(widest, std::acos(cosine));
         }
         metrics.coneHalfAngleDeg = widest * kRadToDeg;
+
+        // How much of that cone was swept in more than one direction. Project
+        // each observation into the tangent plane at the mean, where its length
+        // is the sine of the tilt away from the mean, and take the smaller
+        // principal spread of that 2-D scatter. A single-heading rock lays the
+        // scatter along one line, leaving this near zero however wide the rock.
+        Eigen::Matrix3d scatter = Eigen::Matrix3d::Zero();
+        for (const auto &direction : directions) {
+            const Eigen::Vector3d tangential = direction - mean.dot(direction) * mean;
+            scatter += tangential * tangential.transpose();
+        }
+        scatter /= static_cast<double>(directions.size());
+
+        // Self-adjoint eigenvalues come out ascending; the smallest is along the
+        // mean itself and carries nothing, so the secondary spread is the middle.
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(scatter);
+        const double secondary = std::sqrt(std::max(0.0, eigen.eigenvalues()(1)));
+        metrics.secondarySpreadDeg = std::asin(std::min(1.0, secondary)) * kRadToDeg;
     } else {
         // Directions canceled out entirely, which means they are spread over
         // more than a hemisphere -- ample diversity.
         metrics.coneHalfAngleDeg = 180.0;
+        metrics.secondarySpreadDeg = 90.0;
     }
 
     // Condition of the stacked pivot system [R_i | -I].
@@ -205,9 +225,15 @@ DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
                      << static_cast<int>(criteria.minConeHalfAngleDeg) << " needed. ";
         }
         if (!wellConditioned && enoughSpread) {
-            // Spread is adequate but the system is still poorly conditioned,
-            // which happens when the motion is confined to a single plane.
-            guidance << "Vary the direction of tilt as well as its amount. ";
+            // Tilted far enough, but the solve is still weak. Overwhelmingly
+            // this is rocking at one heading: the tilts lie in a single plane,
+            // leaving the offset along the rocking axis undetermined. Name the
+            // motion that fixes it rather than the geometry that broke.
+            guidance << "Tilted far enough, but every tilt so far is in the same "
+                     << "direction (" << std::fixed << std::setprecision(1)
+                     << metrics.secondarySpreadDeg
+                     << " deg off-axis). Stand the probe up, turn it to a new "
+                     << "heading, and rock again. ";
         }
         metrics.guidance = guidance.str();
     }

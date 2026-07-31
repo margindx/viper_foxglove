@@ -64,7 +64,15 @@ struct CaptureCriteria {
     double minConeHalfAngleDeg{20.0};
     /// Upper bound on the least-squares condition number. Above this the solve
     /// is numerically unreliable even if the other two criteria pass.
-    double maxConditionNumber{100.0};
+    ///
+    /// This is the criterion that catches rocking in a single plane, which the
+    /// cone spread cannot see -- and 100 was far too loose to do it. Measured on
+    /// synthetic captures at 0.5 mm / 0.2 deg sensor noise: rocking at one
+    /// heading conditions at ~57 and misplaces the tip by up to 3.6 mm, while
+    /// two or more headings condition at ~6 and land within 0.5 mm. Real bench
+    /// captures have reported 7.0 and 8.2. 20 sits well clear of a good capture
+    /// and well below a planar one.
+    double maxConditionNumber{20.0};
 };
 
 /// Thresholds for the direction-finding motions (B1 and B2), which need
@@ -86,6 +94,11 @@ struct DiversityMetrics {
     /// Half-angle of the cone enclosing the observed probe-axis directions.
     /// Meaningful for the pivot motion only.
     double coneHalfAngleDeg{0.0};
+    /// RMS tilt away from the dominant tilt direction, in degrees. The cone
+    /// half-angle measures how far the probe was tilted; this measures whether
+    /// it was tilted in more than one direction. Rocking at a single heading
+    /// yields a wide cone and a near-zero value here.
+    double secondarySpreadDeg{0.0};
     /// Condition number of the stacked pivot system; infinity when degenerate.
     /// Pivot motion only.
     double conditionNumber{std::numeric_limits<double>::infinity()};

@@ -167,9 +167,12 @@ bool captureStep(CalibrationSession &session, Viper &viper,
                     std::ostringstream line;
                     line << "\r  " << metrics.sampleCount << " samples";
                     line << " | " << mdx::describeDistortionBrief(viper.distortionSummary());
+                    // Both numbers, because the wide one alone reads as done:
+                    // a single-heading rock shows a full 26 deg of spread with
+                    // nothing off-axis behind it.
                     if (metrics.coneHalfAngleDeg > 0.0)
                         line << " | spread " << static_cast<int>(metrics.coneHalfAngleDeg)
-                             << " deg";
+                             << "/" << static_cast<int>(metrics.secondarySpreadDeg) << " deg";
                     if (metrics.directionSeparation > 0.0)
                         line << " | spin " << std::fixed << std::setprecision(2)
                              << metrics.directionSeparation;
