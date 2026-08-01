@@ -4,6 +4,7 @@
 
 #include "PivotSolve.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -12,6 +13,7 @@ namespace mdx {
 
 namespace {
 
+constexpr double kPi = 3.14159265358979323846;
 constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
 constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
 
@@ -241,6 +243,85 @@ DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
     return metrics;
 }
 
+namespace {
+
+/// How far the probe has actually been turned about the spin axis.
+///
+/// The recovered direction is that axis: the probe lies on a flat and only its
+/// heading changes, so the surface normal is what stays fixed. Mapping a body
+/// vector perpendicular to it into the plane of the surface turns each sample
+/// into a heading, and the answer is the smallest arc containing them all --
+/// found as 360 minus the widest gap, which is what makes it correct across the
+/// wrap-around and for headings visited out of order.
+double turnRange(const std::vector<CalibrationSample> &samples, const DirectionResult &direction) {
+    if (samples.size() < 2)
+        return 0.0;
+
+    const Eigen::Vector3d axis = direction.worldDirection.normalized();
+    const Eigen::Vector3d bodyAxis = direction.sensorDirection.normalized();
+
+    // Any body vector off the axis will do; take the least-aligned basis vector
+    // so the perpendicular part is never degenerate.
+    Eigen::Vector3d seed = Eigen::Vector3d::UnitX();
+    if (std::abs(bodyAxis.x()) > std::abs(bodyAxis.y()))
+        seed = std::abs(bodyAxis.y()) > std::abs(bodyAxis.z()) ? Eigen::Vector3d::UnitZ()
+                                                               : Eigen::Vector3d::UnitY();
+    const Eigen::Vector3d bodyRef = (seed - seed.dot(bodyAxis) * bodyAxis).normalized();
+
+    // A fixed 2-D frame in the plane of the surface, to measure headings in.
+    Eigen::Vector3d planeX = Eigen::Vector3d::UnitX() - Eigen::Vector3d::UnitX().dot(axis) * axis;
+    if (planeX.norm() < 1e-9)
+        planeX = Eigen::Vector3d::UnitY() - Eigen::Vector3d::UnitY().dot(axis) * axis;
+    planeX.normalize();
+    const Eigen::Vector3d planeY = axis.cross(planeX);
+
+    std::vector<double> headings;
+    headings.reserve(samples.size());
+    for (const auto &sample : samples) {
+        const Eigen::Vector3d mapped = sample.orientation.normalized() * bodyRef;
+        const Eigen::Vector3d inPlane = mapped - mapped.dot(axis) * axis;
+        if (inPlane.norm() < 1e-9)
+            continue;   // pointing straight up the axis: no heading to read
+        headings.push_back(std::atan2(inPlane.dot(planeY), inPlane.dot(planeX)));
+    }
+
+    if (headings.size() < 2)
+        return 0.0;
+
+    std::sort(headings.begin(), headings.end());
+
+    double widestGap = 2.0 * kPi - (headings.back() - headings.front());   // across the wrap
+    for (std::size_t i = 1; i < headings.size(); i++)
+        widestGap = std::max(widestGap, headings[i] - headings[i - 1]);
+
+    return std::max(0.0, (2.0 * kPi - widestGap)) * kRadToDeg;
+}
+
+} // namespace
+
+double turnAngleForSeparationDeg(double separation) {
+    if (separation <= 0.0)
+        return 0.0;
+    if (separation >= 1.0)
+        return 360.0;
+
+    // 1 - |sinc(d/2)| rises monotonically from 0 to 1 over (0, 2pi], so plain
+    // bisection is enough and cannot pick the wrong branch.
+    double low = 0.0;
+    double high = 2.0 * kPi;
+    for (int i = 0; i < 60; i++) {
+        const double mid = 0.5 * (low + high);
+        const double half = mid / 2.0;
+        const double sinc = half < 1e-12 ? 1.0 : std::sin(half) / half;
+        if (1.0 - std::abs(sinc) < separation)
+            low = mid;
+        else
+            high = mid;
+    }
+
+    return 0.5 * (low + high) * kRadToDeg;
+}
+
 DiversityMetrics assessDirectionCapture(const std::vector<CalibrationSample> &samples,
                                         const DirectionCriteria &criteria) {
     DiversityMetrics metrics;
@@ -253,6 +334,8 @@ DiversityMetrics assessDirectionCapture(const std::vector<CalibrationSample> &sa
 
     const auto direction = solveCommonDirection(samples);
     metrics.directionSeparation = direction.has_value() ? direction->separation : 0.0;
+    if (direction.has_value())
+        metrics.turnRangeDeg = turnRange(samples, *direction);
 
     const bool enoughSamples = metrics.sampleCount >= criteria.minSamples;
     const bool enoughSpin = metrics.directionSeparation >= criteria.minSeparation;
@@ -269,9 +352,14 @@ DiversityMetrics assessDirectionCapture(const std::vector<CalibrationSample> &sa
             // Not "rotate about its own axis": with the probe lying on a flat,
             // that reads as rolling it about its long axis, which lifts the
             // flat off the surface. Only the heading may change.
-            guidance << "Turn the probe to a different heading between placements, keeping the "
-                        "flat on the surface -- the orientations so far are too alike to pin the "
-                        "direction down. Sliding it without turning it adds samples but no "
+            // In degrees, because the separation itself is a poor progress
+            // bar: it goes as roughly the square of the turn, so it barely
+            // moves over the first 60 degrees and a capture that is going fine
+            // reads as stuck.
+            guidance << "Turned " << static_cast<int>(metrics.turnRangeDeg) << " deg of about "
+                     << static_cast<int>(turnAngleForSeparationDeg(criteria.minSeparation))
+                     << " needed. Turn the probe to a further heading, keeping the flat on the "
+                        "surface -- sliding it without turning it adds samples but no "
                         "information. ";
         }
         metrics.guidance = guidance.str();

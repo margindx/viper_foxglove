@@ -247,6 +247,78 @@ TEST_CASE("rocking at a single heading is refused", "[diversity][negative]") {
     REQUIRE(better.sufficient);
 }
 
+// The number the operator watches during step 2. Separation is the gate, but it
+// is a poor progress bar: it goes as roughly the square of the turn, so it sat
+// near zero through the first 60 degrees and a capture that was going fine read
+// as stuck. Reported in degrees for that reason.
+TEST_CASE("turn progress is reported in degrees", "[diversity][direction]") {
+    // A tilted surface, so nothing lines up with a world axis and the spin axis
+    // has to be recovered rather than assumed.
+    const Eigen::Quaterniond table{
+            Eigen::AngleAxisd(37.0 * kDeg, Eigen::Vector3d{0.4, 0.8, 0.45}.normalized())};
+    const Eigen::Vector3d normal = table * Eigen::Vector3d::UnitZ();
+
+    auto sweep = [&](double degrees) {
+        std::vector<CalibrationSample> samples;
+        for (int i = 0; i < 120; i++) {
+            const double phi = degrees * kDeg * (static_cast<double>(i) / 119.0 - 0.5);
+            const Eigen::Quaterniond q = Eigen::Quaterniond{Eigen::AngleAxisd(phi, normal)} * table;
+            samples.push_back(makeSample({0.1 * std::cos(phi), 0.1 * std::sin(phi), 0.0}, q));
+        }
+        return samples;
+    };
+
+    SECTION("the measured turn tracks the real one") {
+        for (double degrees : {30.0, 90.0, 180.0, 270.0}) {
+            const auto metrics = assessDirectionCapture(sweep(degrees));
+            REQUIRE(metrics.turnRangeDeg > degrees - 3.0);
+            REQUIRE(metrics.turnRangeDeg < degrees + 3.0);
+        }
+    }
+
+    SECTION("separation is nearly flat where the turn is not") {
+        const auto small = assessDirectionCapture(sweep(30.0));
+        const auto medium = assessDirectionCapture(sweep(60.0));
+
+        // Twice the turn, four times the separation -- and both still tiny.
+        // This is exactly what made the raw number unreadable.
+        REQUIRE(small.directionSeparation < 0.02);
+        REQUIRE(medium.directionSeparation < 0.06);
+        REQUIRE(medium.turnRangeDeg > 1.9 * small.turnRangeDeg);
+    }
+
+    SECTION("the guidance names the angle, not the separation") {
+        const auto metrics = assessDirectionCapture(sweep(45.0));
+
+        REQUIRE_FALSE(metrics.sufficient);
+        REQUIRE(metrics.guidance.find("deg of about") != std::string::npos);
+        REQUIRE(metrics.guidance.find("Turned 4") != std::string::npos);
+    }
+
+    SECTION("the gate opens around 111 degrees") {
+        // The angle the default threshold really demands. Worth pinning: it is
+        // the number the instructions and the live display both quote, and it
+        // is far from the "full circle" the step used to ask for.
+        const double needed = turnAngleForSeparationDeg(DirectionCriteria{}.minSeparation);
+        REQUIRE(needed > 105.0);
+        REQUIRE(needed < 118.0);
+
+        REQUIRE_FALSE(assessDirectionCapture(sweep(needed - 15.0)).sufficient);
+        REQUIRE(assessDirectionCapture(sweep(needed + 15.0)).sufficient);
+    }
+
+    SECTION("degenerate input yields no angle rather than a wrong one") {
+        std::vector<CalibrationSample> identical(60,
+                makeSample({0.1, 0.0, 0.0}, Eigen::Quaterniond::Identity()));
+        REQUIRE(assessDirectionCapture(identical).turnRangeDeg < 1.0);
+
+        REQUIRE(turnAngleForSeparationDeg(0.0) == 0.0);
+        REQUIRE(turnAngleForSeparationDeg(-1.0) == 0.0);
+        REQUIRE(turnAngleForSeparationDeg(1.0) == 360.0);
+        REQUIRE(turnAngleForSeparationDeg(2.0) == 360.0);
+    }
+}
+
 TEST_CASE("direction capture is judged on spin, not tilt", "[diversity][direction]") {
     const Eigen::Vector3d faceNormalSensor = Eigen::Vector3d::UnitX();
     const Eigen::Vector3d surfaceNormal = Eigen::Vector3d::UnitZ();

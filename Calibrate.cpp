@@ -173,9 +173,14 @@ bool captureStep(CalibrationSession &session, Viper &viper,
                     if (metrics.coneHalfAngleDeg > 0.0)
                         line << " | spread " << static_cast<int>(metrics.coneHalfAngleDeg)
                              << "/" << static_cast<int>(metrics.secondarySpreadDeg) << " deg";
+                    // Degrees, not the raw separation: separation rises as
+                    // roughly the square of the turn, so it reads as stuck for
+                    // the first 60 degrees of a capture that is going fine.
                     if (metrics.directionSeparation > 0.0)
-                        line << " | spin " << std::fixed << std::setprecision(2)
-                             << metrics.directionSeparation;
+                        line << " | turned " << static_cast<int>(metrics.turnRangeDeg) << "/"
+                             << static_cast<int>(mdx::turnAngleForSeparationDeg(
+                                        mdx::DirectionCriteria{}.minSeparation))
+                             << " deg";
                     line << (metrics.sufficient ? " | SUFFICIENT -- press Enter"
                                                 : " | " + metrics.guidance);
                     line << "        ";

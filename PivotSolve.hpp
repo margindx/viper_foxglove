@@ -75,6 +75,13 @@ struct CaptureCriteria {
     double maxConditionNumber{20.0};
 };
 
+/// Turn angle, in degrees, at which a uniform sweep reaches `separation`.
+///
+/// Separation is 1 - |sinc(delta/2)| for a sweep of delta, so this inverts that
+/// numerically. Used to phrase the gate as an angle the operator can act on;
+/// the reported progress is measured, not derived from this.
+double turnAngleForSeparationDeg(double separation);
+
 /// Thresholds for the direction-finding motions (B1 and B2), which need
 /// different diversity from the pivot: the probe axis is deliberately held
 /// constant while the probe is spun and repositioned, so cone spread is the
@@ -105,6 +112,20 @@ struct DiversityMetrics {
     /// Singular-value separation of the summed rotations. Direction motions
     /// only.
     double directionSeparation{0.0};
+    /// Smallest arc, in degrees, containing every heading the probe has been
+    /// set to. Direction motions only.
+    ///
+    /// For the intended continuous turn this is the angle swept. For a few
+    /// discrete placements it is their coverage, which can be less than the
+    /// path taken between them -- the information is in the headings, not in
+    /// how the probe travelled between them, so coverage is the honest figure.
+    /// Slightly optimistic in proportion to how much the probe rocks, since the
+    /// arc encloses that too.
+    ///
+    /// Measured rather than inverted from the separation, and shown in place of
+    /// it: separation goes as roughly the square of the turn, so it barely
+    /// moves over the first 60 degrees and makes a working capture feel stuck.
+    double turnRangeDeg{0.0};
     bool sufficient{false};
 
     /// What still needs to happen, phrased for an operator. Empty when

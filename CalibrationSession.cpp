@@ -67,9 +67,15 @@ StepInfo describeStep(CalibrationStep step) {
                     "gives a result that looks equally plausible and is 180 degrees out.\n"
                     "\n"
                     "Keeping that side on the surface the whole time, turn the probe slowly "
-                    "through a full circle, as though sweeping a clock hand around. Do not lift "
+                    "in ONE direction, as though sweeping a clock hand around. Do not lift "
                     "it, and take care not to let it rock -- the section is oval, so uneven "
                     "pressure will tilt it, and any tilt goes straight into the answer.\n"
+                    "\n"
+                    "One direction, not back and forth. What counts is the range of headings "
+                    "you cover, so sweeping back over ground already covered adds samples and "
+                    "no information. The prompt shows the angle turned so far against the angle "
+                    "needed -- about a third of a turn. Going further still helps a little, so "
+                    "carry on to a half turn or more if the cable allows it.\n"
                     "\n"
                     "Everything is recorded while you do this, so anything captured with the "
                     "side off the surface pulls the answer off.\n"
@@ -79,9 +85,8 @@ StepInfo describeStep(CalibrationStep step) {
                     "       viewed from above, 4-screw side down:\n"
                     "\n"
                     "         ,------------------.\n"
-                    "         | S            lens|      turn slowly through a full\n"
-                    "         `------------------'      circle, keeping the 4-screw\n"
-                    "                                   side down throughout"};
+                    "         | S            lens|      turn steadily one way, keeping\n"
+                    "         `------------------'      the 4-screw side down throughout"};
 
         case CalibrationStep::Done:
             return {step, "Complete", "All captures gathered."};

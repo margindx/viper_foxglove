@@ -295,8 +295,20 @@ STEP 1 — lens pivot                   STEP 2 — body side
 
 2. **Body side.** The probe body is oval in cross-section, with two opposite sides flatter than the rest. One
    shows **4 screws**, the other 6. Lay the probe down with the **4-screw side** against the surface, and let
-   it settle. Then, keeping that side on the surface the whole time, turn the probe slowly through a full
-   circle, as though sweeping a clock hand around.
+   it settle. Then, keeping that side on the surface the whole time, turn the probe slowly **in one
+   direction**, as though sweeping a clock hand around.
+
+   **The gate opens at about a third of a turn (≈111°), not a full circle.** What the solve uses is the range
+   of headings covered, so sweeping back and forth over ground already covered adds samples and no
+   information. Going beyond the gate still helps, but with sharply diminishing returns — measured against
+   synthetic captures at the rocking level of a real run, the recovered direction improves from 0.28° at the
+   gate to 0.21° at a half turn and 0.17° at a full circle. A half turn is a good target, and a full circle
+   winds the cable, which is worth avoiding for its own sake.
+
+   The live prompt reports **degrees turned against degrees needed** rather than the raw singular-value
+   separation the gate is computed from. Separation rises as roughly the square of the turn — 0.011 at 30°,
+   0.045 at 60°, 0.101 at 90° — so it reads as barely moving through the first half of a perfectly good
+   capture, and made the step feel as though it were demanding far more turning than it was.
 
    **Which side goes down decides the roll**, and the two differ by half a turn. Using the 6-screw side, or
    swapping part way through, produces a result that looks equally plausible and is 180° out. Nothing in the
