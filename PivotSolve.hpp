@@ -206,6 +206,26 @@ struct PlaneTranslationResult {
 /// tilts onto an edge, so it carries its own bias -- a different one from the
 /// pivot's contact migration. Agreement between the two is evidence; a large
 /// disagreement means at least one model is being strained.
+/// How far the plane-constraint offset can move purely because the normal it
+/// borrows is uncertain.
+///
+/// The check takes its surface normal from step 2, which measures that normal
+/// with its own RMS error. Tilting the normal by that error and re-solving says
+/// how much of any observed disagreement the borrowed normal explains on its
+/// own -- and it is usually most of it, because the plane system is weakly
+/// conditioned and the offset is a long lever arm.
+///
+/// Without this the disagreement was being read as evidence about the pivot,
+/// which it is not: a well-conditioned pivot next to a large gap was reported as
+/// a physical inconsistency even when the normal's own error accounted for the
+/// whole thing.
+///
+/// Returns the largest shift over a ring of tilt directions, relative to
+/// `reference`. Zero if the perturbed systems cannot be solved.
+double planeCheckNormalSensitivity(const std::vector<CalibrationSample> &samples,
+                                   const Eigen::Vector3d &normal, double normalErrorDeg,
+                                   const Eigen::Vector3d &reference);
+
 std::optional<PlaneTranslationResult> solvePlaneTranslation(
         const std::vector<CalibrationSample> &samples, const Eigen::Vector3d &planeNormal);
 

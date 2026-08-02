@@ -433,6 +433,83 @@ TEST_CASE("plane translation recovers the offset from rocking data", "[plane]") 
     REQUIRE(result->residualRms < 1e-9);
 }
 
+// The plane check borrows its surface normal from step 2, and the warning that
+// reads its disagreement used to decide "real physical inconsistency" from the
+// condition numbers alone -- without ever asking how much of the gap the
+// borrowed normal accounted for. How much that is turns out not to be a
+// constant, which is why it has to be measured per capture.
+TEST_CASE("normal sensitivity scales with the plane system's conditioning", "[plane]") {
+    const Eigen::Vector3d tipOffset{0.1931, 0.0144, -0.0033};
+    const Eigen::Vector3d pivot{0.2, -0.1, 0.4};
+    const Eigen::Vector3d normal = Eigen::Vector3d::UnitZ();
+
+    auto capture = [&](int headings, double sweepDeg, double noise) {
+        std::vector<CalibrationSample> samples;
+        for (int i = 0; i < 300; i++) {
+            const double heading = 180.0 * kDeg * (i % headings) / headings;
+            const double rock = sweepDeg * kDeg * std::sin(i * 0.11);
+            const Eigen::Quaterniond q =
+                    Eigen::Quaterniond{Eigen::AngleAxisd(heading, Eigen::Vector3d::UnitX())} *
+                    Eigen::Quaterniond{Eigen::AngleAxisd(rock, Eigen::Vector3d::UnitY())};
+            const Eigen::Vector3d jitter{angleFor(i, noise, 1), angleFor(i, noise, 2),
+                                         angleFor(i, noise, 3)};
+            samples.push_back(makeSample(pivot - q.normalized() * tipOffset + jitter,
+                                         q.normalized()));
+        }
+        return samples;
+    };
+
+    SECTION("exact data is insensitive to the normal at any conditioning") {
+        // With the tip truly at one point, n.(p_i + R_i t) = n.p_pivot for ANY
+        // n, so the true offset satisfies the plane constraint whatever normal
+        // is supplied. The sensitivity is a noise effect, not a geometric one.
+        const auto samples = capture(4, 25.0, 0.0);
+        const auto solved = solvePlaneTranslation(samples, normal);
+        REQUIRE(solved.has_value());
+
+        REQUIRE(planeCheckNormalSensitivity(samples, normal, 4.241, solved->tipOffset) < 0.001);
+    }
+
+    SECTION("a well-conditioned check barely moves") {
+        const auto samples = capture(4, 25.0, 0.004);
+        const auto solved = solvePlaneTranslation(samples, normal);
+        REQUIRE(solved.has_value());
+        REQUIRE(solved->conditionNumber < 20.0);
+
+        // Degrees of normal error, a fraction of a millimeter of consequence.
+        // This is the case where a large gap really does mean something.
+        REQUIRE(planeCheckNormalSensitivity(samples, normal, 4.241, solved->tipOffset) < 0.002);
+    }
+
+    SECTION("an ill-conditioned check moves by millimeters") {
+        const auto samples = capture(2, 14.0, 0.004);
+        const auto solved = solvePlaneTranslation(samples, normal);
+        REQUIRE(solved.has_value());
+        REQUIRE(solved->conditionNumber > 100.0);
+
+        const double sensitivity =
+                planeCheckNormalSensitivity(samples, normal, 4.241, solved->tipOffset);
+        REQUIRE(sensitivity > 0.002);
+
+        // And a smaller step-2 error is proportionately less damaging, so the
+        // figure tracks the fit rather than just the conditioning.
+        const double smaller =
+                planeCheckNormalSensitivity(samples, normal, 1.0, solved->tipOffset);
+        REQUIRE(smaller < sensitivity);
+    }
+
+    SECTION("no error, no sensitivity") {
+        const auto samples = capture(4, 25.0, 0.004);
+        const auto solved = solvePlaneTranslation(samples, normal);
+        REQUIRE(solved.has_value());
+
+        REQUIRE(planeCheckNormalSensitivity(samples, normal, 0.0, solved->tipOffset) == 0.0);
+        REQUIRE(planeCheckNormalSensitivity({}, normal, 4.0, solved->tipOffset) == 0.0);
+        REQUIRE(planeCheckNormalSensitivity(samples, Eigen::Vector3d::Zero(), 4.0,
+                                            solved->tipOffset) == 0.0);
+    }
+}
+
 TEST_CASE("plane translation rejects a degenerate normal", "[plane][negative]") {
     const auto samples = makePivotCapture({0.157, 0, 0}, {0.1, 0.1, 0.1}, 40, 40.0);
 

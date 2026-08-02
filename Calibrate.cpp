@@ -263,17 +263,37 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount,
                   << outcome.planeCheck->conditionNumber << " (pivot: "
                   << outcome.pivot.conditionNumber << ")\n";
 
+        std::cout << "    Normal sensitivity  " << std::fixed << std::setprecision(2)
+                  << outcome.disagreementFromNormalM * 1000.0 << " mm (from step 2's "
+                  << std::setprecision(3) << outcome.bodyFlat.residualDeg << " deg fit)\n";
+
         if (outcome.offsetDisagreementM > 0.005) {
-            // Which estimate to distrust is decided by the conditioning, not by
-            // the size of the gap. The plane check is the weaker of the two --
-            // one equation per sample instead of three, and a normal borrowed
-            // from a different capture -- so it fails first and fails quietly.
             const bool checkIllConditioned = outcome.planeCheck->conditionNumber > 100.0;
             const bool pivotIllConditioned = outcome.pivot.conditionNumber > 100.0;
 
+            // The gap is read against what the borrowed normal can do to this
+            // check on its own, measured on these samples. That scale is not a
+            // constant: with a well-conditioned plane system a degrees-level
+            // normal error moves the answer by a fraction of a millimeter,
+            // while with a badly conditioned one it moves it by centimeters.
+            // Judging by conditioning alone therefore got this backwards --
+            // a plane condition under the threshold was reported as proof of a
+            // physical inconsistency without ever asking how much of the gap
+            // the normal accounted for.
+            const bool normalExplainsIt =
+                    outcome.disagreementFromNormalM > 0.5 * outcome.offsetDisagreementM;
+
             std::cout << "    WARNING: the two estimates differ by more than 5 mm.\n";
 
-            if (checkIllConditioned && !pivotIllConditioned) {
+            if (normalExplainsIt) {
+                std::cout << "             Tilting the step-2 normal by its own fit error moves "
+                             "this check by\n             "
+                          << std::fixed << std::setprecision(2)
+                          << outcome.disagreementFromNormalM * 1000.0 << " mm, which accounts for "
+                             "most of the gap. That makes this a\n             statement about "
+                             "step 2, not evidence against the pivot. Judge the\n             "
+                             "offset by the pivot's own residual and condition above.\n";
+            } else if (checkIllConditioned && !pivotIllConditioned) {
                 std::cout << "             The check itself is ill-conditioned, so the gap says "
                              "little about\n             the pivot. Disregard this check and judge "
                              "the offset by the pivot's\n             own residual and condition "
@@ -283,17 +303,12 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount,
                              "a wider and\n             more varied sweep before trusting either "
                              "number.\n";
             } else {
-                std::cout << "             Both solves are well conditioned, so this is a real "
-                             "physical\n             inconsistency rather than numerical noise. "
-                             "The usual causes are the\n             surface used for step 1 not "
-                             "being parallel to the one used for step 2,\n             or the tip "
-                             "not actually resting on the surface throughout step 1.\n";
+                std::cout << "             The gap is larger than either the conditioning or the "
+                             "borrowed normal\n             explains, so it points to something "
+                             "physical. The usual causes are the\n             surface used for "
+                             "step 1 not being parallel to the one used for step 2,\n             "
+                             "or the tip not actually resting on the surface throughout step 1.\n";
             }
-
-            std::cout << "             The plane normal comes from step 2, whose fit was "
-                      << std::setprecision(3) << outcome.bodyFlat.residualDeg
-                      << " deg RMS at separation " << outcome.bodyFlat.separation
-                      << ";\n             a poor figure there invalidates this check on its own.\n";
         }
     } else {
         std::cout << "\n  Independent plane-constraint check unavailable for this capture.\n";

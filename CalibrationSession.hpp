@@ -67,6 +67,15 @@ struct CalibrationOutcome {
     /// values mean the two error models disagree and neither should be trusted
     /// without investigation.
     double offsetDisagreementM{0.0};
+    /// How far the plane-constraint offset moves when the normal it borrows
+    /// from step 2 is tilted by that step's own RMS fit error, meters.
+    ///
+    /// The scale against which offsetDisagreementM has to be read. A gap no
+    /// larger than this is the borrowed normal, not a disagreement about the
+    /// probe -- and the size of it depends strongly on how well conditioned the
+    /// plane system is, so it has to be measured per capture rather than
+    /// assumed.
+    double disagreementFromNormalM{0.0};
 
     /// How far the solved rotation sits from identity, degrees. Small values
     /// are more likely noise than a real mounting angle.

@@ -473,6 +473,40 @@ std::optional<DirectionResult> solveCommonDirection(const std::vector<Calibratio
     return result;
 }
 
+double planeCheckNormalSensitivity(const std::vector<CalibrationSample> &samples,
+                                   const Eigen::Vector3d &normal, double normalErrorDeg,
+                                   const Eigen::Vector3d &reference) {
+    if (samples.empty() || normalErrorDeg <= 0.0 || normal.norm() < 1e-9)
+        return 0.0;
+
+    const Eigen::Vector3d axis = normal.normalized();
+
+    // A basis for the tilt directions. Which way the normal is wrong is not
+    // known, so a ring is walked and the worst case taken -- the question being
+    // answered is whether the normal's error *could* account for the gap, not
+    // whether one particular tilt does.
+    Eigen::Vector3d u = axis.cross(Eigen::Vector3d::UnitX());
+    if (u.norm() < 1e-6)
+        u = axis.cross(Eigen::Vector3d::UnitY());
+    u.normalize();
+    const Eigen::Vector3d v = axis.cross(u);
+
+    const double delta = normalErrorDeg * kDegToRad;
+    constexpr int kDirections = 8;
+
+    double worst = 0.0;
+    for (int i = 0; i < kDirections; i++) {
+        const double theta = 2.0 * kPi * static_cast<double>(i) / kDirections;
+        const Eigen::Vector3d tilt = std::cos(theta) * u + std::sin(theta) * v;
+        const Eigen::Vector3d perturbed = (axis * std::cos(delta) + tilt * std::sin(delta)).normalized();
+
+        if (const auto solved = solvePlaneTranslation(samples, perturbed))
+            worst = std::max(worst, (solved->tipOffset - reference).norm());
+    }
+
+    return worst;
+}
+
 std::optional<PlaneTranslationResult> solvePlaneTranslation(
         const std::vector<CalibrationSample> &samples, const Eigen::Vector3d &planeNormal) {
     if (samples.size() < 4 || !allUsable(samples))

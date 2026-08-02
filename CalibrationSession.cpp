@@ -239,6 +239,13 @@ std::optional<CalibrationOutcome> CalibrationSession::solve(double bodyFlatRollD
     if (outcome.planeCheck.has_value()) {
         outcome.offsetDisagreementM =
                 (outcome.planeCheck->tipOffset - outcome.tipOffset).norm();
+
+        // What the borrowed normal alone can do to this check, measured on
+        // these samples rather than assumed. Without it the gap was being read
+        // as evidence about the pivot even when the normal accounted for it.
+        outcome.disagreementFromNormalM = planeCheckNormalSensitivity(
+                pivotSamples_, outcome.bodyFlat.worldDirection, outcome.bodyFlat.residualDeg,
+                outcome.planeCheck->tipOffset);
     }
 
     return outcome;

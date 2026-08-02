@@ -349,6 +349,27 @@ a plane constraint to the same rocking samples, using the surface normal from st
 error model, so agreement between the two is evidence — and a disagreement above 5 mm is reported together
 with both condition numbers, since the plane check is the weaker solve and fails first.
 
+**A disagreement is only meaningful against the error in the normal the check borrows.** That normal comes
+from step 2 and carries step 2's own RMS fit error, so the report also states how far tilting the normal by
+that error moves the check — measured by re-solving on the same samples, not estimated from a formula. The
+scale is not a constant and cannot be guessed from the fit alone:
+
+| plane-check condition | effect of a 4.24° normal error |
+| --- | --- |
+| exact data, any conditioning | **0 mm** — the true offset satisfies the constraint for *any* normal |
+| well conditioned (< 20) | under 1 mm |
+| ill conditioned (> 100) | several mm to centimeters |
+
+The first row is worth keeping in mind: with the tip genuinely at one point, `n·(pᵢ + Rᵢ·t)` equals `n·p_pivot`
+whatever normal you supply, so this sensitivity is a noise effect rather than a geometric one. It appears only
+once the samples scatter, and then in proportion to how badly the plane system is conditioned.
+
+That is why the warning is no longer decided by the condition numbers alone. It previously announced a "real
+physical inconsistency" whenever both solves came in under a fixed threshold, without asking how much of the
+gap the borrowed normal accounted for — so a capture at plane condition 44.7 was reported as physical
+evidence when it was largely a statement about step 2. When the measured sensitivity accounts for over half
+the gap, the report now says so and sends you back to the pivot's own residual.
+
 Note what calibration cannot do: step 2 determines orientation only. With the flat down every time, the
 offset along its normal is perfectly confounded with the unknown position of the surface, so those placements
 carry no information about the translation at all.
