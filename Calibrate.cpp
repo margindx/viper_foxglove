@@ -171,8 +171,13 @@ bool captureStep(CalibrationSession &session, Viper &viper,
                     // a single-heading rock shows a full 26 deg of spread with
                     // nothing off-axis behind it.
                     if (metrics.coneHalfAngleDeg > 0.0)
-                        line << " | spread " << static_cast<int>(metrics.coneHalfAngleDeg)
+                        line << " | tilt " << static_cast<int>(metrics.coneHalfAngleDeg)
                              << "/" << static_cast<int>(metrics.secondarySpreadDeg) << " deg";
+                    // The number the step is actually gated on, and the one
+                    // that says what the answer is worth.
+                    if (metrics.offset.valid)
+                        line << " | offset to " << std::fixed << std::setprecision(1)
+                             << metrics.offset.worstM * 1000.0 << " mm";
                     // Degrees, not the raw separation: separation rises as
                     // roughly the square of the turn, so it reads as stuck for
                     // the first 60 degrees of a capture that is going fine.
@@ -231,6 +236,21 @@ void reportOutcome(const CalibrationOutcome &outcome, int sensorCount,
               << "  (sensor body axes)\n";
     std::cout << "  Samples / condition   " << outcome.pivot.sampleCount << " / " << std::fixed
               << std::setprecision(1) << outcome.pivot.conditionNumber << "\n";
+    if (outcome.offsetUncertainty.valid) {
+        std::cout << "  Offset uncertainty    " << std::fixed << std::setprecision(2)
+                  << outcome.offsetUncertainty.worstM * 1000.0 << " mm worst direction, "
+                  << outcome.offsetUncertainty.bestM * 1000.0 << " mm best ("
+                  << std::setprecision(1) << outcome.offsetUncertainty.anisotropy() << "x)\n";
+
+        if (outcome.offsetUncertainty.anisotropy() > 2.0) {
+            std::cout << "  NOTE: the offset is far better determined in some directions than "
+                         "others. On the\n        bench that shows as a tip which tracks well "
+                         "when the probe is rocked one way\n        and wanders when it is "
+                         "rocked across -- an offset error along the rocking\n        axis is "
+                         "invariant under that rock and only appears under the perpendicular "
+                         "one.\n";
+        }
+    }
 
     // Those are the sensor's own axes, not the probe's. They coincide only when
     // the tip rotation is identity; with a rotated mount an error that is

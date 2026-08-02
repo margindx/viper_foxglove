@@ -62,6 +62,26 @@ struct CaptureCriteria {
     /// direction. A capture swept through a narrow cone is ill-conditioned no
     /// matter how many samples it contains.
     double minConeHalfAngleDeg{20.0};
+    /// Upper bound on the worst-determined direction of the tip offset, in
+    /// meters -- the gate that actually decides when step 1 is done.
+    ///
+    /// The condition number below cannot do this job. It is one scalar over six
+    /// unknowns, so it averages away the thing that matters: a capture can be
+    /// well conditioned overall while one direction of the offset is several
+    /// times less determined than the others. At a condition of 20 the worst
+    /// direction is still uncertain by around 2.6 mm while the best is under
+    /// 1 mm, and that anisotropy is visible on the bench as a tip that tracks
+    /// well when the probe is rocked one way and wanders when it is rocked
+    /// across -- because an offset error along the rocking axis is invariant
+    /// under that rock and only shows up under the perpendicular one.
+    ///
+    /// 1.2 mm needs roughly 35-40 degrees of variation in tilt direction. At
+    /// the residual of a real bench capture (8.43 mm RMS) the floor -- what no
+    /// amount of further motion improves on -- is about 0.91 mm, so this is
+    /// reachable without being generous. A cleaner capture reaches it sooner,
+    /// which is the right behaviour: less motion is needed when the data is
+    /// better.
+    double maxOffsetUncertaintyM{0.0012};
     /// Upper bound on the least-squares condition number. Above this the solve
     /// is numerically unreliable even if the other two criteria pass.
     ///
@@ -94,6 +114,35 @@ struct DirectionCriteria {
     double minSeparation{0.15};
 };
 
+/// Spread of the tip offset the capture can support, as an uncertainty
+/// ellipsoid in the sensor frame.
+///
+/// Reported per direction rather than as one number because that is how the
+/// error behaves: rocking about a single axis leaves the offset undetermined
+/// along that same axis, so the uncertainty is genuinely anisotropic and a
+/// scalar summary hides the failure.
+struct OffsetUncertainty {
+    /// One standard deviation along the best- and worst-determined directions.
+    double bestM{0.0};
+    double worstM{std::numeric_limits<double>::infinity()};
+    /// The worst-determined direction, in the sensor frame. Rocking about an
+    /// axis perpendicular to this is what improves it.
+    Eigen::Vector3d worstDirection{Eigen::Vector3d::Zero()};
+    bool valid{false};
+
+    /// worstM / bestM. Above about 2 the capture is lopsided, which is what
+    /// puts a directional error into the tip.
+    double anisotropy() const;
+};
+
+/// Propagate the fit residual through the pivot system to get the offset's
+/// uncertainty ellipsoid.
+///
+/// Validated against the error actually made, over 400 synthetic captures per
+/// geometry: predicted-to-actual came out at 1.04, 1.02 and 1.01 for captures
+/// whose worst direction sat at 6.7, 2.6 and 1.3 mm.
+OffsetUncertainty offsetUncertainty(const std::vector<CalibrationSample> &samples);
+
 /// Live feedback while capturing, so the operator can be told what is missing
 /// rather than being failed at the end.
 struct DiversityMetrics {
@@ -107,8 +156,11 @@ struct DiversityMetrics {
     /// yields a wide cone and a near-zero value here.
     double secondarySpreadDeg{0.0};
     /// Condition number of the stacked pivot system; infinity when degenerate.
-    /// Pivot motion only.
+    /// Pivot motion only. Reported rather than gated on -- see
+    /// CaptureCriteria::maxOffsetUncertaintyM.
     double conditionNumber{std::numeric_limits<double>::infinity()};
+    /// What the capture so far can pin the offset down to. Pivot motion only.
+    OffsetUncertainty offset;
     /// Singular-value separation of the summed rotations. Direction motions
     /// only.
     double directionSeparation{0.0};

@@ -192,6 +192,97 @@ TEST_CASE("capture assessment guides an inadequate sweep", "[diversity]") {
     }
 }
 
+// Reported from the bench twice over: step 1 announced sufficient before the
+// operator had varied the rocking direction much, and the resulting offset made
+// the tip track well when the probe was rocked one way and wander when it was
+// rocked across. Both are the same fact -- the offset is undetermined along the
+// axis being rocked about, and a scalar condition number over six unknowns
+// cannot express that one of three directions is bad.
+TEST_CASE("offset uncertainty exposes what conditioning averages away", "[pivot][diversity]") {
+    const Eigen::Vector3d tipOffset{0.1791, 0.0013, 0.0083};
+    const Eigen::Vector3d pivot{0.2, -0.1, 0.4};
+
+    // Rocks about body Y, with `headingSpreadDeg` of variation in tilt
+    // direction and a little noise so the uncertainty is not degenerate.
+    // angleFor is uniform, so a scale of 0.0139 is a standard deviation of
+    // 4 mm -- the noise level of a real bench capture. The default test noise
+    // is roughly a third of that, too clean to reproduce what was reported.
+    auto capture = [&](double headingSpreadDeg, double noiseM) {
+        std::vector<CalibrationSample> samples;
+        for (int i = 0; i < 308; i++) {
+            const double heading = headingSpreadDeg * kDeg * ((i % 4) / 3.0 - 0.5);
+            const double rock = 25.0 * kDeg * std::sin(i * 0.11);
+            const Eigen::Quaterniond q =
+                    Eigen::Quaterniond{Eigen::AngleAxisd(heading, Eigen::Vector3d::UnitX())} *
+                    Eigen::Quaterniond{Eigen::AngleAxisd(rock, Eigen::Vector3d::UnitY())};
+            const Eigen::Vector3d jitter{angleFor(i, noiseM, 1), angleFor(i, noiseM, 2),
+                                         angleFor(i, noiseM, 3)};
+            samples.push_back(
+                    makeSample(pivot - q.normalized() * tipOffset + jitter, q.normalized()));
+        }
+        return samples;
+    };
+
+    SECTION("the weak direction is the axis being rocked about") {
+        const auto uncertainty = offsetUncertainty(capture(5.0, 0.0139));
+
+        REQUIRE(uncertainty.valid);
+        // Rocking is about body Y, and that is where the offset is loose.
+        REQUIRE(std::abs(uncertainty.worstDirection.dot(Eigen::Vector3d::UnitY())) > 0.95);
+        REQUIRE(uncertainty.anisotropy() > 2.0);
+    }
+
+    SECTION("a lopsided capture is refused even though it conditions well") {
+        // This is the case that was getting through. Everything the old gate
+        // looked at is satisfied -- samples, tilt range, condition under 20 --
+        // while one direction of the offset is still millimetres loose.
+        const auto samples = capture(20.0, 0.0139);
+        const auto metrics = assessCapture(samples);
+
+        REQUIRE(metrics.sampleCount > 40);
+        REQUIRE(metrics.coneHalfAngleDeg > 20.0);
+        // Comfortably inside the condition bound, so it is the uncertainty and
+        // nothing else that holds the gate shut.
+        REQUIRE(metrics.conditionNumber < 16.0);
+
+        REQUIRE(metrics.offset.valid);
+        REQUIRE(metrics.offset.worstM > 0.0012);
+        REQUIRE_FALSE(metrics.sufficient);
+
+        // And the guidance says the one thing that fixes it, since more of the
+        // same rocking will not.
+        REQUIRE(metrics.guidance.find("will not help") != std::string::npos);
+        REQUIRE(metrics.guidance.find("across") != std::string::npos);
+    }
+
+    SECTION("varying the tilt direction opens the gate") {
+        const auto narrow = assessCapture(capture(20.0, 0.0139));
+        const auto wide = assessCapture(capture(60.0, 0.0139));
+
+        REQUIRE(wide.offset.worstM < narrow.offset.worstM);
+        REQUIRE(wide.offset.anisotropy() < narrow.offset.anisotropy());
+        REQUIRE(wide.sufficient);
+    }
+
+    SECTION("a degenerate capture has unbounded uncertainty, not a small one") {
+        // Every sample identical: nothing is determined. The gate must read
+        // that as infinitely loose rather than as a perfect fit with zero
+        // residual, which is what a naive residual-only check would do.
+        std::vector<CalibrationSample> identical(
+                80, makeSample(pivot, Eigen::Quaterniond::Identity()));
+
+        const auto uncertainty = offsetUncertainty(identical);
+        REQUIRE_FALSE(uncertainty.valid);
+        REQUIRE(uncertainty.worstM == std::numeric_limits<double>::infinity());
+        REQUIRE_FALSE(assessCapture(identical).sufficient);
+    }
+
+    SECTION("too little data yields no estimate") {
+        REQUIRE_FALSE(offsetUncertainty({}).valid);
+        REQUIRE_FALSE(offsetUncertainty({makeSample(pivot, Eigen::Quaterniond::Identity())}).valid);
+    }
+}
+
 // The case that reached the bench: an operator rocked the probe back and forth
 // at one heading and was told the capture was sufficient while still on that
 // first rock. Cone spread cannot see it -- rocking 25 degrees in one plane

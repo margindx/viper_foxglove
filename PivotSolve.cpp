@@ -141,6 +141,54 @@ Eigen::Vector3d zyxDegreesFromQuaternion(const Eigen::Quaterniond &q) {
     return Eigen::Vector3d{azimuth * kRadToDeg, elevation * kRadToDeg, roll * kRadToDeg};
 }
 
+double OffsetUncertainty::anisotropy() const {
+    if (!valid || bestM <= 0.0)
+        return std::numeric_limits<double>::infinity();
+    return worstM / bestM;
+}
+
+OffsetUncertainty offsetUncertainty(const std::vector<CalibrationSample> &samples) {
+    OffsetUncertainty uncertainty;
+
+    const auto solved = solvePointPivot(samples);
+    if (!solved.has_value())
+        return uncertainty;
+
+    const auto rows = static_cast<Eigen::Index>(3 * samples.size());
+    Eigen::MatrixXd a(rows, 6);
+    for (std::size_t i = 0; i < samples.size(); i++) {
+        a.block<3, 3>(3 * static_cast<Eigen::Index>(i), 0) =
+                samples[i].orientation.normalized().toRotationMatrix();
+        a.block<3, 3>(3 * static_cast<Eigen::Index>(i), 3) = -Eigen::Matrix3d::Identity();
+    }
+
+    // Covariance of the solution is sigma^2 (A^T A)^-1. A rank-deficient system
+    // has no inverse and no bounded uncertainty, which is the honest answer:
+    // leave worstM at infinity so the gate stays shut.
+    const Eigen::Matrix<double, 6, 6> normal = a.transpose() * a;
+    Eigen::FullPivLU<Eigen::Matrix<double, 6, 6>> lu(normal);
+    if (!lu.isInvertible())
+        return uncertainty;
+
+    // residualRms is the RMS of the 3-D per-sample error, while the covariance
+    // wants the noise on one scalar equation -- three rows per sample, hence
+    // the sqrt(3). Getting this wrong scales every figure below by 1.73.
+    const double sigma = solved->residualRms / std::sqrt(3.0);
+
+    const Eigen::Matrix3d offsetBlock = lu.inverse().topLeftCorner<3, 3>();
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(offsetBlock);
+    if (eigen.info() != Eigen::Success)
+        return uncertainty;
+
+    // Ascending eigenvalues; the largest is the least-determined direction.
+    uncertainty.bestM = sigma * std::sqrt(std::max(0.0, eigen.eigenvalues()(0)));
+    uncertainty.worstM = sigma * std::sqrt(std::max(0.0, eigen.eigenvalues()(2)));
+    uncertainty.worstDirection = eigen.eigenvectors().col(2).normalized();
+    uncertainty.valid = true;
+
+    return uncertainty;
+}
+
 DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
                                const CaptureCriteria &criteria) {
     DiversityMetrics metrics;
@@ -209,11 +257,18 @@ DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
         metrics.conditionNumber = conditionFrom(svd.singularValues());
     }
 
+    metrics.offset = offsetUncertainty(samples);
+
     const bool enoughSamples = metrics.sampleCount >= criteria.minSamples;
     const bool enoughSpread = metrics.coneHalfAngleDeg >= criteria.minConeHalfAngleDeg;
     const bool wellConditioned = metrics.conditionNumber <= criteria.maxConditionNumber;
+    // The gate that decides the step. The other two are cheap guards that fail
+    // earlier and phrase their own guidance; this is the one that says whether
+    // the answer is good enough to keep.
+    const bool offsetDetermined =
+            metrics.offset.valid && metrics.offset.worstM <= criteria.maxOffsetUncertaintyM;
 
-    metrics.sufficient = enoughSamples && enoughSpread && wellConditioned;
+    metrics.sufficient = enoughSamples && enoughSpread && wellConditioned && offsetDetermined;
 
     if (!metrics.sufficient) {
         std::ostringstream guidance;
@@ -226,11 +281,23 @@ DiversityMetrics assessCapture(const std::vector<CalibrationSample> &samples,
                      << static_cast<int>(metrics.coneHalfAngleDeg) << " degrees of "
                      << static_cast<int>(criteria.minConeHalfAngleDeg) << " needed. ";
         }
-        if (!wellConditioned && enoughSpread) {
-            // Tilted far enough, but the solve is still weak. Overwhelmingly
-            // this is rocking at one heading: the tilts lie in a single plane,
-            // leaving the offset along the rocking axis undetermined. Name the
-            // motion that fixes it rather than the geometry that broke.
+        if (enoughSpread && !offsetDetermined) {
+            // Tilted far enough, but the answer is still loose in one
+            // direction -- and that direction is the axis being rocked about,
+            // which is why more of the same rocking will not fix it. Name the
+            // motion that will.
+            guidance << "Tilted far enough, but the offset is only pinned to "
+                     << std::fixed << std::setprecision(1);
+            if (metrics.offset.valid)
+                guidance << metrics.offset.worstM * 1000.0 << " mm across one direction ("
+                         << std::setprecision(1) << metrics.offset.anisotropy()
+                         << "x worse than the best). ";
+            else
+                guidance << "nothing yet in one direction. ";
+            guidance << "Rocking further the same way will not help: the offset is loose "
+                        "along the axis you are rocking about. Turn the probe about its own "
+                        "long axis, or to a new heading, and rock across instead. ";
+        } else if (!wellConditioned && enoughSpread) {
             guidance << "Tilted far enough, but every tilt so far is in the same "
                      << "direction (" << std::fixed << std::setprecision(1)
                      << metrics.secondarySpreadDeg

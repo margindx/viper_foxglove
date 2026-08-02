@@ -282,6 +282,29 @@ STEP 1 — lens pivot                   STEP 2 — body side
    5 mm from the short one, so rocking on the short edge displaces the datum ten times as far. Keep it in
    reserve for when the varied headings alone do not satisfy the gate.
 
+   **Step 1 is gated on what the offset is actually worth, not on a condition number.** The prompt reports
+   the worst-determined direction of the offset in millimeters and will not finish until that is under
+   1.2 mm. The condition number could not do this job: it is one scalar over six unknowns, so it averages
+   away the fact that one direction of the offset can be far looser than the others.
+
+   That anisotropy is the thing you can see on the bench. **The least-determined direction is the axis you
+   rock about** — in simulation, 0.25° from it — and an offset error along that axis is invariant under that
+   rock:
+
+   | rocking about | how far the tip estimate wanders |
+   | --- | --- |
+   | the axis parallel to the error | **0.00 mm** |
+   | the perpendicular axis | **5.00 mm** |
+
+   So a tip that tracks beautifully when you rock one way and wanders when you rock across is not a display
+   problem — it is a direct read-out of an offset error along the axis you rocked about while calibrating.
+   The result block flags an anisotropy above 2× for that reason.
+
+   Either motion fixes it, but not equally fast. At a 4 mm noise level, reaching 1.2 mm takes about 35–40°
+   of heading variation, or roughly 15° of rocking over the second edge — the short edge is about twice as
+   efficient per degree, which is the trade against the contact migration it costs. Both saturate around
+   0.9 mm, beyond which more motion buys nothing.
+
    The prompt will not let a single-heading capture through, but it used to. The spread figure alone cannot
    tell the two apart — rocking 25 degrees in one plane reports the same 25 degrees a varied sweep does — so
    the condition number is the only thing separating them, and its bound was loose enough to pass a planar

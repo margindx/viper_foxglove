@@ -230,6 +230,8 @@ std::optional<CalibrationOutcome> CalibrationSession::solve(double bodyFlatRollD
     if (outcome.tipRotation.has_value())
         outcome.rotationFromIdentityDeg = rotationAngleDeg(*outcome.tipRotation);
 
+    outcome.offsetUncertainty = mdx::offsetUncertainty(pivotSamples_);
+
     // Second opinion: the plane constraint on the rocking samples, using the
     // surface normal the flat placements established. A different error model,
     // so agreement is meaningful.

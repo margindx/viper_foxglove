@@ -56,6 +56,10 @@ struct CalibrationOutcome {
     std::optional<Eigen::Quaterniond> tipRotation;
 
     PivotResult pivot;
+    /// What the capture can pin the offset down to, per direction. The residual
+    /// says how well the model fits; this says what the answer is worth, which
+    /// is the question actually being asked.
+    OffsetUncertainty offsetUncertainty;
     /// The housing flat's normal in the sensor frame, and the surface normal in
     /// tracker coordinates, from step 2.
     DirectionResult bodyFlat;
