@@ -4,6 +4,8 @@
 
 #include "Viper.hpp"
 
+#include <cstring>
+
 uint16_t Viper::crcTable_[256] =
 {
 0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
@@ -123,6 +125,383 @@ void Viper::startContinuousRead() {
     continuousPublishThread_ = std::thread{&Viper::publishContinuous, this};
 }
 
+bool Viper::queryConfig(uint32_t cmd, uint32_t arg1, void *payload, uint32_t payloadSize) {
+    constexpr uint32_t kCmdSize = 32;
+    constexpr uint32_t kRespSize = 512;      // WHOAMI is the largest payload, at 192
+    constexpr uint32_t kPayloadOffset = 28;  // preamble + size + SEUCMD
+
+    uint8_t cmdPkg[kCmdSize];
+    uint8_t respPkg[kRespSize];
+
+    memset(cmdPkg, 0, kCmdSize);
+    auto *phdr = (SEUCMD_HDR *) cmdPkg;
+    phdr->preamble = VIPER_CMD_PREAMBLE;
+    phdr->size = 24;
+    phdr->seucmd.cmd = cmd;
+    phdr->seucmd.action = CMD_ACTION_GET;
+    phdr->seucmd.arg1 = arg1;
+
+    const uint32_t cmdCrc = calculateCrc16(cmdPkg, 28);
+    memcpy(cmdPkg + 28, &cmdCrc, CRC_SIZE);
+
+    viperUsb.usb_send_cmd(cmdPkg, kCmdSize);
+    std::this_thread::sleep_for(std::chrono::milliseconds(CMD_DELAY));
+
+    const uint32_t br = cmdQueue_.wait_and_pop(respPkg, kRespSize);
+
+    // Every failure path reports "unknown". Treating an unanswered query as a
+    // default value would defeat the point of asking.
+    if (br < kPayloadOffset + payloadSize + CRC_SIZE)
+        return false;
+
+    if (*(uint32_t *) respPkg != VIPER_CMD_PREAMBLE)
+        return false;
+
+    if (!validateCrc(calculateCrc16(respPkg, br - 4), respPkg, br - 4))
+        return false;
+
+    if (!checkAck(respPkg))
+        return false;
+
+    memcpy(payload, respPkg + kPayloadOffset, payloadSize);
+
+    return true;
+}
+
+void Viper::readDeviceState(uint32_t nSensors) {
+    std::vector<std::string> unreadable;
+    auto note = [&unreadable](const std::string &what) { unreadable.push_back(what); };
+
+    fgInterface_->logInfo("--- Viper device configuration ---");
+
+    // Identity, for the record: which box and which firmware produced this
+    // recording. Costs nothing and answers a question that is otherwise
+    // unanswerable after the fact.
+    {
+        WHOAMI_STRUCT whoami{};
+        if (queryConfig(CMD_WHOAMI, 0, &whoami, sizeof(whoami))) {
+            auto bounded = [](const char *field, size_t size) {
+                return std::string(field, ::strnlen(field, size));
+            };
+
+            std::stringstream ss;
+            ss << "Device: " << bounded(whoami.device_name, NAME_SIZE)
+               << ", serial " << bounded(whoami.hw_ser_no, SERNUM_SIZE)
+               << ", firmware " << bounded(whoami.dsp_app_fw_pn, PN_SIZE);
+            fgInterface_->logInfo(ss.str());
+        } else {
+            note("WHOAMI");
+        }
+    }
+
+    // ---- Settings that silently transform the geometry. These stop the run.
+    {
+        SRCROT_CONFIG srcrot{};
+        if (queryConfig(CMD_SRC_ROTATION, 0, &srcrot, sizeof(srcrot))) {
+            mdx::DeviceRotation rotation;
+            for (int i = 0; i < 4; i++)
+                rotation.params[i] = srcrot.rot[i];
+
+            if (!rotation.isNeutral()) {
+                raiseFatalError(mdx::sourceRotationMessage(0, rotation));
+                return;
+            }
+        } else {
+            note("source rotation");
+        }
+    }
+
+    for (uint32_t sensor = 0; sensor < nSensors; sensor++) {
+        const std::string label = " (sensor " + std::to_string(sensor) + ")";
+
+        TIP_OFFSET_CONFIG tipoff{};
+        if (queryConfig(CMD_TIP_OFFSET, sensor, &tipoff, sizeof(tipoff))) {
+            const Eigen::Vector3d offset{tipoff.params[0], tipoff.params[1], tipoff.params[2]};
+
+            if (offset.norm() > 1e-9) {
+                std::stringstream ss;
+                ss << "The Viper is already applying a tip offset of [" << offset.x() << ", "
+                   << offset.y() << ", " << offset.z() << "] to sensor " << sensor
+                   << ". Positions it reports are therefore already displaced to a tip, and the "
+                      "probe_profiles offset would be added on top of it. Clear it on the device "
+                      "(CMD_TIP_OFFSET reset) and let probe_profiles own the offset.";
+                raiseFatalError(ss.str());
+                return;
+            }
+        } else {
+            note("tip offset" + label);
+        }
+
+        BORESIGHT_CONFIG boresight{};
+        if (queryConfig(CMD_BORESIGHT, sensor, &boresight, sizeof(boresight))) {
+            mdx::DeviceRotation rotation;
+            for (int i = 0; i < 4; i++)
+                rotation.params[i] = boresight.params[i];
+
+            if (!rotation.isNeutral()) {
+                raiseFatalError(mdx::boresightMessage(static_cast<int>(sensor), rotation));
+                return;
+            }
+        } else {
+            note("boresight" + label);
+        }
+
+        // ---- Settings that change latency and cadence but not geometry.
+        //
+        // The sensor origin is recorded here rather than gated. It selects
+        // which source a sensor references, which this program was refusing to
+        // run on -- but that is a deliberate configuration choice on a rig that
+        // may have reason to use it, and stopping the run over it was not ours
+        // to make. Logged so the recording still carries the value.
+        uint32_t origin = 0;
+        if (queryConfig(CMD_SNS_ORIGIN, sensor, &origin, sizeof(origin))) {
+            fgInterface_->logInfo("Sensor origin" + label + ": " +
+                                  mdx::sensorOriginLabel(origin));
+        } else {
+            note("sensor origin" + label);
+        }
+
+        FILTER_CONFIG filter{};
+        if (queryConfig(CMD_FILTER, sensor, &filter, sizeof(filter))) {
+            mdx::FilterSettings settings;
+            settings.level = filter.level;
+            for (int i = 0; i < 4; i++)
+                settings.params[i] = filter.params[i];
+
+            fgInterface_->logInfo("Filter" + label + ": " + mdx::describeFilter(settings));
+        } else {
+            note("filter" + label);
+        }
+
+        PF_CONFIG predictive{};
+        if (queryConfig(CMD_PREDFILTER_CFG, sensor, &predictive, sizeof(predictive))) {
+            mdx::PredictiveFilterSettings settings;
+            settings.quaternion = predictive.qFil_on != 0;
+            settings.position = predictive.rFil_on != 0;
+            settings.predictionSeconds = predictive.predTimeS;
+
+            fgInterface_->logInfo("Predictive filter" + label + ": " +
+                                  mdx::describePredictiveFilter(settings));
+        } else {
+            note("predictive filter" + label);
+        }
+
+        // The extended form leads with the same three fields, so only those are
+        // read; the rest is documented as internal use.
+        PF_CONFIG predictiveExt{};
+        if (queryConfig(CMD_PREDFILTER_EXT, sensor, &predictiveExt, sizeof(predictiveExt))) {
+            mdx::PredictiveFilterSettings settings;
+            settings.quaternion = predictiveExt.qFil_on != 0;
+            settings.position = predictiveExt.rFil_on != 0;
+            settings.predictionSeconds = predictiveExt.predTimeS;
+
+            fgInterface_->logInfo("Predictive filter, extended" + label + ": " +
+                                  mdx::describePredictiveFilter(settings));
+        } else {
+            note("predictive filter, extended" + label);
+        }
+
+        INCREMENT_CONFIG increment{};
+        if (queryConfig(CMD_INCREMENT, sensor, &increment, sizeof(increment))) {
+            mdx::IncrementSettings settings;
+            settings.enabled = increment.enabled != 0;
+            settings.positionThreshold = increment.fPosThresh;
+            settings.orientationThreshold = increment.fOriThresh;
+
+            fgInterface_->logInfo("Increment mode" + label + ": " +
+                                  mdx::describeIncrement(settings));
+
+            // Any sensor in increment mode is enough: the stream then carries
+            // frames only when something moved, so arrival rate stops being a
+            // measure of link health.
+            if (settings.enabled)
+                incrementModeActive_ = true;
+        } else {
+            note("increment mode" + label);
+        }
+    }
+
+    {
+        uint32_t frameRate = 0;
+        if (queryConfig(CMD_FRAMERATE, 0, &frameRate, sizeof(frameRate))) {
+            fgInterface_->logInfo("Frame rate: " + mdx::frameRateLabel(frameRate) +
+                                  " (config expects " + std::to_string(expectedFrameRateHz_) +
+                                  " Hz)");
+
+            const auto reportedHz = mdx::frameRateHzFromCode(frameRate);
+            if (!reportedHz.has_value() || *reportedHz != expectedFrameRateHz_) {
+                raiseFatalError(mdx::frameRateMismatchMessage(expectedFrameRateHz_, frameRate));
+                return;
+            }
+        } else {
+            // Unlike the other settings, an unreadable frame rate stops the
+            // run. Two reasons: the config now states an expectation that
+            // cannot otherwise be confirmed, and the delivered-rate check has
+            // nothing to compare against without it.
+            note("frame rate");
+            raiseFatalError(mdx::frameRateUnreadableMessage(expectedFrameRateHz_));
+            return;
+        }
+    }
+
+    fgInterface_->logInfo("--- end of Viper device configuration ---");
+
+    if (!unreadable.empty()) {
+        // Not fatal. Failing to read a setting is not evidence that it is safe,
+        // but refusing to run on a device that answers some queries and not
+        // others would be worse than saying which ones went unanswered.
+        std::stringstream ss;
+        ss << "Could not read the following Viper settings, so they are unverified:";
+        for (const auto &what : unreadable)
+            ss << " " << what << ";";
+        ss << " a geometry transform hiding in one of those would displace the published tip.";
+        fgInterface_->logWarning(ss.str());
+    }
+}
+
+void Viper::measureDeliveredRate() {
+    // Settle before measuring. The first moments after the stream opens carry
+    // enumeration and buffering effects that have nothing to do with whether
+    // the link can sustain the rate, and with a 10% band there is no room to
+    // absorb them.
+    constexpr auto kSettle = std::chrono::milliseconds(500);
+    // Long enough that counting whole frames is precise: the worst case is
+    // 30 Hz, where one frame either way over 2 s is 1.7%.
+    constexpr auto kWindow = std::chrono::milliseconds(2000);
+
+    if (rateChecked_)
+        return;
+
+    std::string refusal;
+    {
+        std::lock_guard<std::mutex> guard{rateMtx_};
+        const auto now = std::chrono::steady_clock::now();
+
+        if (!rateSawFirstFrame_) {
+            rateSawFirstFrame_ = true;
+            rateFirstFrame_ = now;
+            return;
+        }
+
+        if (!rateWindowOpen_) {
+            if (now - rateFirstFrame_ < kSettle)
+                return;
+
+            rateWindowOpen_ = true;
+            rateWindowStart_ = now;
+            rateFrames_ = 0;
+            return;
+        }
+
+        rateFrames_++;
+
+        const auto elapsed = now - rateWindowStart_;
+        if (elapsed < kWindow)
+            return;
+
+        const double seconds = std::chrono::duration<double>(elapsed).count();
+        deliveredFrameRateHz_ = static_cast<double>(rateFrames_) / seconds;
+        rateChecked_ = true;
+
+        if (incrementModeActive_) {
+            // Skipped rather than failed. Increment mode is a legitimate
+            // setting this program logs rather than gates, and refusing here
+            // would make it effectively illegal -- a larger decision than the
+            // rate check was asked to make. Said loudly so the gap is on the
+            // record.
+            fgInterface_->logWarning(
+                    "Delivered frame rate NOT checked: a sensor is in increment mode, so frames "
+                    "arrive only after movement and the arrival rate says nothing about the "
+                    "link. The configured rate was verified; what actually arrives was not.");
+            return;
+        }
+
+        std::stringstream ss;
+        ss << "Delivered frame rate: " << std::fixed << std::setprecision(1)
+           << deliveredFrameRateHz_ << " Hz over " << rateFrames_ << " frames";
+        fgInterface_->logInfo(ss.str());
+
+        if (mdx::deliveredRateOutOfBand(expectedFrameRateHz_, deliveredFrameRateHz_)) {
+            refusal = mdx::deliveredFrameRateMessage(expectedFrameRateHz_, deliveredFrameRateHz_,
+                                                     rateFrames_, seconds);
+        }
+    }
+
+    // Raised outside the lock: raiseFatalError takes its own.
+    if (!refusal.empty())
+        raiseFatalError(refusal);
+}
+
+void Viper::monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t frameCounter) {
+    measureDeliveredRate();
+
+    // The frame counter is in every frame and was previously read and thrown
+    // away. Gaps in it are the direct evidence of dropped data that an
+    // unexplained publish rate only hints at.
+    if (haveFrameCounter_) {
+        const uint32_t expected = lastFrameCounter_ + 1;
+
+        if (frameCounter != expected) {
+            const uint32_t missing = frameCounter - expected;   // wraps correctly
+
+            // A backwards or wildly large jump is a counter reset, not a drop.
+            if (missing < 1000u) {
+                framesDropped_ += missing;
+
+                if ((++frameGapEvents_ % 100) == 1) {
+                    std::stringstream ss;
+                    ss << "Gap in the Viper frame counter: " << missing
+                       << " frame(s) missing (" << framesDropped_ << " dropped across "
+                       << frameGapEvents_ << " gap(s) so far)";
+                    fgInterface_->logWarning(ss.str());
+                }
+            }
+        }
+    }
+
+    lastFrameCounter_ = frameCounter;
+    haveFrameCounter_ = true;
+
+    // Worst level across the sensors in this frame, accumulated so a caller can
+    // ask what the signal was like over a window it defines.
+    uint32_t worstDistortion = 0;
+
+    for (uint32_t i = 0; i < nSensors; i++) {
+        const SENFRAMEDATA *pfd = pfd_all + i;
+
+        // A virtual sensor is one the SEU reports without it being physically
+        // present. Fusing it would average a fabricated pose into the tip, so
+        // this stops rather than quietly averaging.
+        if (pfd->SFinfo.bfSvirt) {
+            std::stringstream ss;
+            ss << "Sensor " << i
+               << " is reported as virtual. It has no physical sensor behind it, so fusing it "
+                  "would average a fabricated pose into the probe tip. Remove the virtual sensor "
+                  "on the device (CMD_SNS_VIRTUAL reset) or connect the missing sensor.";
+            raiseFatalError(ss.str());
+            return;
+        }
+
+        const uint32_t distortion = pfd->SFinfo.bfDistortion;
+        worstDistortion = std::max(worstDistortion, distortion);
+
+        if (distortion >= mdx::kDistortionWarnLevel) {
+            if ((++distortedFrames_ % 200) == 1) {
+                fgInterface_->logWarning(
+                        mdx::distortionMessage(distortion, static_cast<int>(i), distortedFrames_));
+            }
+        }
+    }
+
+    if (nSensors > 0) {
+        std::lock_guard<std::mutex> guard{distortionMtx_};
+        distortion_.current = worstDistortion;
+        distortion_.peak = std::max(distortion_.peak, worstDistortion);
+        distortion_.sum += worstDistortion;
+        distortion_.frames++;
+    }
+}
+
 uint32_t Viper::calculateCrc16(uint8_t *b, uint32_t len) {
     uint32_t crc = 0;
     while (len--)
@@ -149,7 +528,7 @@ void Viper::publishContinuous() {
     uint64_t sizeMismatchedFrames = 0;
     uint64_t crcFailedFrames = 0;
 
-    while (isContinuous) {
+    while (isContinuous && !fatalError_) {
         br = pnoQueue_.wait_and_pop(respPkg, respSize);
 
         if (!br)
@@ -184,6 +563,38 @@ void Viper::publishContinuous() {
         static bool printed = false; if (!printed) { std::cout << "Using " << nSensors << " position sensors" << std::endl; printed = true; }
         pfd = (SENFRAMEDATA*)(respPkg + kHdrEndLoc);
         frame = *(uint32_t*)(respPkg + 12);
+
+        // The device's unit settings are persistent and only observable from a
+        // frame, so this is the earliest point they can be checked. Everything
+        // downstream assumes meters and quaternions; anything else would be
+        // silently misinterpreted rather than failing visibly.
+        if (!unitsChecked_ && nSensors > 0) {
+            unitsChecked_ = true;
+            const auto units = mdx::decodeFrameUnits(pfd->SFinfo.bfPosUnits,
+                                                     pfd->SFinfo.bfOriUnits);
+
+            if (!units.isSupported()) {
+                raiseFatalError(mdx::unsupportedUnitsMessage(units));
+                break;
+            }
+
+            fgInterface_->logInfo("Viper reporting " + mdx::describe(units));
+            std::cout << "Viper reporting " << mdx::describe(units) << std::endl;
+        }
+
+        // Per-sensor queries, so this needs the count the first frame gave us.
+        if (!deviceTipOffsetsChecked_ && nSensors > 0) {
+            deviceTipOffsetsChecked_ = true;
+            readDeviceState(nSensors);
+
+            if (fatalError_)
+                break;
+        }
+
+        monitorFrame(pfd, nSensors, frame);
+
+        if (fatalError_)
+            break;
 
         pnoToFoxgloveSceneUpdate(pfd, nSensors);
     }
@@ -361,6 +772,8 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
     // foxglove timestamp
     auto time = foxglove::schemas::Timestamp{static_cast<uint32_t>(sec), static_cast<uint32_t>(nsec)};
 
+    lastSensorCount_ = static_cast<int>(nSensors);
+
     // Pick the probe profile from the number of sensors the SEU is reporting,
     // and latch it. Which probe is fitted is decided by what is plugged in, so
     // the sensor count is the only thing that identifies it.
@@ -375,7 +788,10 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
             // misplaces the tip silently. Refuse, and say why. The raw
             // per-sensor poses are still published below: they need no profile,
             // and they are what you need to diagnose this.
-            if ((++noProfileFrames_ % 100) == 1) {
+            //
+            // Silent during calibration, where having no profile yet is the
+            // entire premise rather than a fault.
+            if (!calibrationMode_ && (++noProfileFrames_ % 100) == 1) {
                 std::stringstream ss;
                 ss << "No probe profile configured for " << nSensors << " sensor(s); "
                    << "not publishing a tip pose. Configured profiles:";
@@ -554,13 +970,30 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
     // Fuse the sensors into one pose, then map that onto the probe tip. With a
     // single sensor the fusion is a pass-through, so the tip pose is that
     // sensor's own pose with the profile's transform applied.
-    // Without a profile there is no trustworthy offset, so no tip pose is
-    // published. That case was already reported above; the raw per-sensor poses
-    // still go out below either way.
-    if (activeProfile_ != nullptr) {
-        const std::optional<mdx::Pose> fused = mdx::fusePoses(sensorPoses);
+    // Fuse unconditionally, whether or not a profile is available. Calibration
+    // runs precisely when there is no profile yet, and the fused pose is what
+    // it has to solve against -- deriving it any other way would calibrate one
+    // estimator and deploy another.
+    const std::optional<mdx::Pose> fused = mdx::fusePoses(sensorPoses);
 
-        if (fused.has_value()) {
+    if (fused.has_value()) {
+        {
+            std::lock_guard<std::mutex> guard{fusedPoseMtx_};
+            latestFusedPose_ = fused;
+        }
+
+        // Latched under the same condition as the fusion, so the two always
+        // describe the same frame. Gating on fusePoses succeeding also means
+        // these have passed its finite-and-unit-norm checks.
+        {
+            std::lock_guard<std::mutex> guard{sensorPosesMtx_};
+            latestSensorPoses_ = sensorPoses;
+        }
+
+        // Without a profile there is no trustworthy offset, so no tip pose is
+        // published. That was reported above; the raw per-sensor poses still go
+        // out below either way.
+        if (activeProfile_ != nullptr) {
             const auto tipPose = toFoxglovePose(mdx::applyTipTransform(fused.value(), activeProfile_->tip));
             auto swingTwist = computeSwingTwist(tipPose);
 
@@ -572,15 +1005,15 @@ void Viper::pnoToFoxgloveSceneUpdate(SENFRAMEDATA *pfd_all, uint32_t nSensors) {
 
             fgInterface_->publishPose(poseInFrame);
             fgInterface_->logSwingTwist(swingTwist);
-        } else if ((++unusableFrames_ % 100) == 1) {
-            // A non-finite or non-unit-norm reading. The raw per-sensor poses
-            // are still published below so the bad frames stay visible in the
-            // MCAP for diagnosis.
-            std::stringstream ss;
-            ss << "Dropped a PNO frame with unusable sensor data (" << unusableFrames_
-               << " frame(s) so far): no tip pose published for it";
-            fgInterface_->logWarning(ss.str());
         }
+    } else if ((++unusableFrames_ % 100) == 1) {
+        // A non-finite or non-unit-norm reading. The raw per-sensor poses are
+        // still published below so the bad frames stay visible in the MCAP for
+        // diagnosis.
+        std::stringstream ss;
+        ss << "Dropped a PNO frame with unusable sensor data (" << unusableFrames_
+           << " frame(s) so far): no tip pose published for it";
+        fgInterface_->logWarning(ss.str());
     }
 
     auto posesInFrame = foxglove::schemas::PosesInFrame{

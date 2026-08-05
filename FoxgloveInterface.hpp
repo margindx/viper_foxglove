@@ -368,12 +368,21 @@ class FoxgloveInterface {
         mcapOptions_.path = path;
         mcapOptions_.context = context_;
 
+        // The writer refuses to open a file that already exists unless told to
+        // truncate, and reports it only as a bare "IO Error". Callers that
+        // delete the file first never noticed; ones that do not fail on every
+        // run after the first. Each run starts a fresh recording anyway, so
+        // truncating here makes that true regardless of the caller.
+        mcapOptions_.truncate = true;
 
         auto writerResult = foxglove::McapWriter::create(mcapOptions_);
         if (!writerResult.has_value()) {
             std::stringstream ss;
-            ss << "Failed to create MCAP writer: " << foxglove::strerror(writerResult.error()) << std::endl;
-            std::cerr << ss.str();
+            ss << "Failed to create MCAP writer for \"" << path << "\": "
+               << foxglove::strerror(writerResult.error())
+               << ". Check that the directory exists and is writable, and that no other "
+                  "process still has that file open.";
+            std::cerr << ss.str() << std::endl;
             throw std::runtime_error(ss.str());
         }
 

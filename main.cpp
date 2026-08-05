@@ -1,6 +1,8 @@
 #include <iostream>
 #include "viper_ui.h"
 #include "ProbeProfile.hpp"
+#include "Calibrate.hpp"
+#include "Monitor.hpp"
 #include "Viper.hpp"
 #include "SerialForce.hpp"
 #include "FoxgloveInterface.hpp"
@@ -40,6 +42,7 @@ int launchFoxglove(std::string config_filename) {
 
     // ---- Parsing runtime config options ---- //
     std::vector<mdx::ProbeProfile> probe_profiles;
+    int expected_frame_rate_hz = 0;
     float min_contact_force = 0.35;
     bool use_hardware_contact = true;
     bool contact_require_f1 = true;
@@ -86,6 +89,16 @@ int launchFoxglove(std::string config_filename) {
             return 1;
         }
 
+        try
+        {
+            expected_frame_rate_hz = mdx::parseExpectedFrameRateHz(settings);
+        }
+        catch (const std::exception &e)
+        {
+            cerr << "Invalid frame rate configuration in " << config_filename << ": " << e.what() << "\n";
+            return 1;
+        }
+
         if (settings.contains("minimum_contact_force"))
         {
             min_contact_force = settings["minimum_contact_force"];
@@ -128,6 +141,7 @@ int launchFoxglove(std::string config_filename) {
     {
         cout << "        " << mdx::describeProfile(profile) << endl;
     }
+    cout << "    expected_frame_rate_hz:" << expected_frame_rate_hz << endl;
     cout << "    pressure_usb_id:" << pressure_usb_id << endl;
 
     cout << "    minimum_contact_force:" << min_contact_force << endl;
@@ -150,7 +164,7 @@ int launchFoxglove(std::string config_filename) {
 
     // The profiles go in through the constructor: it starts the read threads,
     // so anything set afterwards would miss the first frames.
-    Viper viper{&fgInterface, probe_profiles, 10, 100};
+    Viper viper{&fgInterface, probe_profiles, expected_frame_rate_hz, 10, 100};
 
     std::atomic_bool done = false;
     sigint_handler = [&]
@@ -194,6 +208,14 @@ int launchFoxglove(std::string config_filename) {
     long long counter = 1;
 
     while (!done) {
+        // Raised when the run cannot continue safely -- currently only the
+        // device reporting units this program would misinterpret. Stopping is
+        // the point: carrying on would publish plausible, wrongly-scaled poses.
+        if (viper.hasFatalError()) {
+            cerr << "Stopping: " << viper.fatalErrorMessage() << "\n";
+            return 1;
+        }
+
         if (counter % 300 == 0) {
             viper.initTransforms();
             fgInterface.publishPointClouds();
@@ -215,8 +237,50 @@ int launchFoxglove(std::string config_filename) {
 int main(int argc, char** argv) {
 
     std::string config_filename = "viper-config.json";
-    if (argc > 1){
-        config_filename = argv[1];
+    bool calibrate = false;
+    bool monitor = false;
+
+    for (int i = 1; i < argc; i++) {
+        const std::string arg = argv[i];
+
+        if (arg == "--calibrate") {
+            calibrate = true;
+        } else if (arg == "--monitor") {
+            monitor = true;
+        } else if (arg == "--help" || arg == "-h") {
+            cout << "Usage: viper [--calibrate | --monitor] [config-file]\n\n"
+                 << "  --calibrate   Run the guided probe tip calibration and update the\n"
+                 << "                config. Unlike a normal run this does not require an\n"
+                 << "                existing probe_profiles entry for the connected sensor\n"
+                 << "                count, so a probe can be calibrated for the first time.\n"
+                 << "  --monitor     Watch for the EM sensor moving inside the probe body,\n"
+                 << "                which would make the tip offset a quantity that varies\n"
+                 << "                and cannot be calibrated away. Also needs no existing\n"
+                 << "                probe_profiles entry.\n"
+                 << "  config-file   Defaults to viper-config.json in the working directory.\n";
+            return 0;
+        } else {
+            config_filename = arg;
+        }
+    }
+
+    // Calibration deliberately bypasses the probe_profiles requirement: the
+    // whole point is to produce that entry, and the normal path refuses to
+    // start without it.
+    if (calibrate && monitor) {
+        cerr << "--calibrate and --monitor are separate procedures; run one at a time.\n";
+        return 1;
+    }
+
+    if (calibrate) {
+        return mdx::runCalibration(config_filename);
+    }
+
+    // Monitoring, like calibration, bypasses the probe_profiles requirement: a
+    // probe whose sensor may be loose is often one that has never calibrated
+    // cleanly enough to have an entry.
+    if (monitor) {
+        return mdx::runMonitor(config_filename);
     }
 
     return launchFoxglove(config_filename);

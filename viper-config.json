@@ -13,6 +13,7 @@
             "tip_rotation_zyx_deg": [0.0, 0.0, 0.0]
         }
     ],
+    "expected_frame_rate_hz": 240,
     "minimum_contact_force": 0.35,
     "pressure_usb_id": "2886:8064",
     "use_hardware_contact": true,
@@ -23,9 +24,10 @@
     "generate_geometry": true,
     "_comment": {
         "probe_profiles": "REQUIRED. One entry per probe design, identified by how many EM sensors it presents. The profile is chosen automatically from the sensor count in the first Viper frame and then latched, so switching probes means changing what is plugged in -- nothing here needs editing to switch. Startup fails if this block is missing or malformed; there is no default tip offset.",
+        "expected_frame_rate_hz": "REQUIRED. The Viper frame rate this config was written for, in Hz: 30, 60, 120, 240, 480 or 960. Startup refuses to run unless the SEU is set to this rate AND frames are actually arriving within 10% of it. The first catches an SEU reconfigured by another tool; the second catches dropped frames or a link that cannot carry the rate, which the SEU itself cannot see. Poses stay geometrically correct at any rate -- what changes is sample density, latency, and the comparability of one recording with another. If a sensor is in increment mode the delivered check is skipped and says so, since frames then arrive only after movement.",
         "probe_profiles.sensor_count": "REQUIRED. Number of connected EM sensors this profile applies to. Each count may appear at most once.",
         "probe_profiles.label": "Optional name, echoed to the log when the profile is selected.",
-        "probe_profiles.tip_offset_m": "REQUIRED. [x, y, z] offset in metres from the fused sensor origin to the probe tip, expressed in the sensor frame. x is the along-probe direction; y and z are horizontal offsets to the probe centre and are normally 0.",
+        "probe_profiles.tip_offset_m": "REQUIRED. [x, y, z] offset in meters from the fused sensor origin to the probe tip, expressed in the sensor frame. x is the along-probe direction; y and z are horizontal offsets to the probe center and are normally 0.",
         "probe_profiles.tip_rotation_zyx_deg": "Optional [azimuth, elevation, roll] in degrees, rotating the sensor frame onto the tip frame (the Viper's own Z-Y-X convention). Omit for identity, which is correct when the sensor is mounted along the probe axis. It rotates the published orientation as well as placing the tip.",
         "probe_profiles.WARNING": "The 1-sensor tip_offset_m above is a placeholder copied from the 3-sensor value and is NOT correct. The 3-sensor number is the centroid-of-three to tip distance; a single sensor sits somewhere else on the probe. Measure it before trusting single-sensor data.",
         "minimum_contact_force": "(NOT USED) the force threshold, above which we have contact",

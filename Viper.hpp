@@ -9,11 +9,14 @@
 #include <thread>
 #include <optional>
 #include <mutex>
+#include <atomic>
 #include "viper_usb.h"
 #include "viper_queue.h"
 #include "ViperInterface.h"
 #include "SensorData.hpp"
 #include "ProbeProfile.hpp"
+#include "FrameUnits.hpp"
+#include "DeviceState.hpp"
 #include "FoxgloveInterface.hpp"
 
 #include "schema/foxglove/Time_generated.h"
@@ -50,10 +53,106 @@ protected:
     const mdx::ProbeProfile *activeProfile_ = nullptr;
     int latchedSensorCount_ = -1;
 
+    /// Sensor count from the most recent frame, independent of whether a
+    /// profile was ever latched. Calibration needs this precisely in the case
+    /// where no profile exists to latch.
+    std::atomic<int> lastSensorCount_{-1};
+
     /// Rate-limiting counters for the repeating fault paths.
     uint64_t noProfileFrames_ = 0;
     uint64_t countMismatchFrames_ = 0;
     uint64_t unusableFrames_ = 0;
+
+    /// The units the device reports are only knowable once a frame arrives, so
+    /// they are checked on the first one rather than at construction.
+    bool unitsChecked_ = false;
+
+    /// Likewise the SEU's own tip offset, which is per-sensor and so can only
+    /// be interrogated once the sensor count is known.
+    bool deviceTipOffsetsChecked_ = false;
+
+    /// Send a configuration GET and copy the payload out. False when the device
+    /// did not answer in a form we can read, which is treated as "unknown"
+    /// rather than as a default value.
+    bool queryConfig(uint32_t cmd, uint32_t arg1, void *payload, uint32_t payloadSize);
+
+    /// Read the device's configuration once, before trusting any of its data.
+    /// Settings that silently transform the geometry stop the run; the rest are
+    /// logged so a recording carries the configuration it was made under.
+    void readDeviceState(uint32_t nSensors);
+
+    /// Per-frame checks on fields the SEU sends but we would otherwise discard.
+    void monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t frameCounter);
+
+    /// Frame-counter continuity, so dropped frames are visible rather than
+    /// showing up only as an unexplained rate.
+    bool haveFrameCounter_ = false;
+    uint32_t lastFrameCounter_ = 0;
+    uint64_t frameGapEvents_ = 0;
+    uint64_t framesDropped_ = 0;
+
+    /// Frames seen above the distortion warning level.
+    uint64_t distortedFrames_ = 0;
+
+    /// Distortion accumulated since the last reset, so a caller can bound it to
+    /// a window of its own choosing -- one calibration step, for instance.
+    std::mutex distortionMtx_;
+    mdx::DistortionSummary distortion_;
+
+    /// Calibration runs before a probe has a profile, so the usual "no profile"
+    /// complaint is expected there rather than a fault.
+    bool calibrationMode_ = false;
+
+    /// The rate this config says the rig runs at. Checked twice: against what
+    /// the SEU reports it is set to, and against what actually arrives.
+    int expectedFrameRateHz_ = 0;
+
+    /// Delivered-rate measurement. Counting received frames rather than reading
+    /// the SEU's own frame counter is deliberate: that counter advances whether
+    /// or not the frame reaches us, so only a count of arrivals can see
+    /// dropping.
+    std::mutex rateMtx_;
+    std::chrono::steady_clock::time_point rateFirstFrame_{};
+    std::chrono::steady_clock::time_point rateWindowStart_{};
+    bool rateSawFirstFrame_ = false;
+    bool rateWindowOpen_ = false;
+    std::uint64_t rateFrames_ = 0;
+    std::atomic_bool rateChecked_{false};
+    double deliveredFrameRateHz_ = 0.0;
+
+    /// Increment mode makes the device report only after movement, so the
+    /// delivered rate is legitimately below the configured one and the check
+    /// cannot mean anything. Recorded while reading the configuration.
+    bool incrementModeActive_ = false;
+
+    void measureDeliveredRate();
+
+    /// Most recent fused sensor pose, before any tip transform. This is what
+    /// calibration must solve against: the pose the offset gets added to.
+    std::mutex fusedPoseMtx_;
+    std::optional<mdx::Pose> latestFusedPose_;
+
+    /// Most recent per-sensor poses, unfused. Stability monitoring needs these
+    /// rather than the fusion: averaging several sensors is precisely what
+    /// hides one of them moving relative to the others.
+    std::mutex sensorPosesMtx_;
+    std::vector<mdx::Pose> latestSensorPoses_;
+
+    /// Set when the run cannot continue safely. The publish thread stops and
+    /// main is expected to notice and exit non-zero.
+    std::atomic_bool fatalError_{false};
+    std::mutex fatalErrorMtx_;
+    std::string fatalErrorMessage_;
+
+    void raiseFatalError(const std::string &message) {
+        {
+            std::lock_guard<std::mutex> guard{fatalErrorMtx_};
+            fatalErrorMessage_ = message;
+        }
+        fgInterface_->logError("Fatal: " + message);
+        std::cerr << "Fatal: " << message << std::endl;
+        fatalError_ = true;
+    }
 
     flatbuffers::FlatBufferBuilder fbBuilder_;
     FoxgloveInterface *fgInterface_;
@@ -78,16 +177,22 @@ public:
     /// The profiles must be supplied here rather than through a setter: the
     /// constructor starts the USB read and continuous-publish threads, so a
     /// profile set afterwards would arrive too late for the first frames.
+    /// `calibrationMode` allows construction with no profiles at all, which is
+    /// how a probe that has never been calibrated gets bootstrapped: there is
+    /// no offset to publish yet, but the fused pose is still needed.
     explicit Viper(FoxgloveInterface* fgInterface, std::vector<mdx::ProbeProfile> profiles,
-                   size_t reconnectTries=0, size_t timeOutMs=5) :
-        fbBuilder_(1024), profiles_(std::move(profiles)), fgInterface_(fgInterface), viperUsb{} {
+                   int expectedFrameRateHz,
+                   size_t reconnectTries=0, size_t timeOutMs=5, bool calibrationMode=false) :
+        fbBuilder_(1024), profiles_(std::move(profiles)),
+        expectedFrameRateHz_(expectedFrameRateHz), calibrationMode_(calibrationMode),
+        fgInterface_(fgInterface), viperUsb{} {
         if (fgInterface == nullptr) {
             throw std::runtime_error("FoxgloveInterface delivered as nullptr");
         } else {
             fgInterface_ = fgInterface;
         }
 
-        if (profiles_.empty()) {
+        if (profiles_.empty() && !calibrationMode_) {
             throw std::runtime_error("Viper constructed with no probe profiles");
         }
 
@@ -180,6 +285,59 @@ public:
     void initPoseInFrame() {
         hhPose_.frame_id = "viper";
         posesInFrame_.frame_id = "viper";
+    }
+
+    /// The most recent fused sensor pose, before any tip transform is applied.
+    /// Empty until the first frame that fuses successfully. This is the pose
+    /// calibration solves against, so that the offset it produces is the offset
+    /// this exact fusion will later have added to it.
+    std::optional<mdx::Pose> latestFusedPose() {
+        std::lock_guard<std::mutex> guard{fusedPoseMtx_};
+        return latestFusedPose_;
+    }
+
+    /// The per-sensor poses from the most recent usable frame, in sensor order,
+    /// before fusion or any tip transform. Empty until the first such frame.
+    std::vector<mdx::Pose> latestSensorPoses() {
+        std::lock_guard<std::mutex> guard{sensorPosesMtx_};
+        return latestSensorPoses_;
+    }
+
+    /// Distortion since the last resetDistortion(). Safe to call from any thread.
+    mdx::DistortionSummary distortionSummary() {
+        std::lock_guard<std::mutex> guard{distortionMtx_};
+        return distortion_;
+    }
+
+    /// Start a fresh distortion window.
+    void resetDistortion() {
+        std::lock_guard<std::mutex> guard{distortionMtx_};
+        distortion_ = mdx::DistortionSummary{};
+    }
+
+    /// True once the delivered-rate window has closed and been judged. Callers
+    /// wait for this before treating the run as healthy, since the refusal it
+    /// can raise arrives seconds after the first pose does.
+    bool deliveredRateChecked() const { return rateChecked_; }
+
+    /// Measured arrival rate, meaningful once deliveredRateChecked() is true.
+    double deliveredFrameRateHz() {
+        std::lock_guard<std::mutex> guard{rateMtx_};
+        return deliveredFrameRateHz_;
+    }
+
+    /// Sensor count from the most recent frame, or -1 before any has arrived.
+    /// Unlike the latched profile count this is available with no profile
+    /// configured, which is the state calibration runs in.
+    int lastSensorCount() const { return lastSensorCount_; }
+
+    /// True when the run has hit a condition it cannot continue safely from,
+    /// e.g. the device reporting units this program would misinterpret.
+    bool hasFatalError() const { return fatalError_; }
+
+    std::string fatalErrorMessage() {
+        std::lock_guard<std::mutex> guard{fatalErrorMtx_};
+        return fatalErrorMessage_;
     }
 
     void connect();

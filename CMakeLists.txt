@@ -146,6 +146,22 @@ add_executable(viper main.cpp viper_ui.h viper_usb.h viper_usb.cpp ViperInterfac
         SensorData.hpp
         ProbeProfile.cpp
         ProbeProfile.hpp
+        FrameUnits.cpp
+        FrameUnits.hpp
+        DeviceState.cpp
+        DeviceState.hpp
+        PivotSolve.cpp
+        PivotSolve.hpp
+        ProbeConfigIo.cpp
+        ProbeConfigIo.hpp
+        CalibrationSession.cpp
+        CalibrationSession.hpp
+        Calibrate.cpp
+        Calibrate.hpp
+        StabilityMonitor.cpp
+        StabilityMonitor.hpp
+        Monitor.cpp
+        Monitor.hpp
         Viper.cpp
         Viper.hpp
         FoxgloveInterface.cpp
@@ -233,8 +249,25 @@ find_package(Catch2 3 CONFIG QUIET)
 if(Catch2_FOUND)
     add_executable(viper_tests
             tests/test_probe_profile.cpp
+            tests/test_frame_units.cpp
+            tests/test_device_state.cpp
+            tests/test_pivot_solve.cpp
+            tests/test_calibration_session.cpp
+            tests/test_stability_monitor.cpp
             ProbeProfile.cpp
-            ProbeProfile.hpp)
+            ProbeProfile.hpp
+            FrameUnits.cpp
+            FrameUnits.hpp
+            DeviceState.cpp
+            DeviceState.hpp
+            PivotSolve.cpp
+            PivotSolve.hpp
+            ProbeConfigIo.cpp
+            ProbeConfigIo.hpp
+            CalibrationSession.cpp
+            CalibrationSession.hpp
+            StabilityMonitor.cpp
+            StabilityMonitor.hpp)
 
     target_include_directories(viper_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}

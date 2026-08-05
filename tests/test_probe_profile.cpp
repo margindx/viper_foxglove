@@ -107,7 +107,7 @@ TEST_CASE("antipodal quaternions fuse correctly", "[fuse][regression]") {
     // Regression test for the sign bug: q and -q denote the same rotation, so
     // three sensors that agree perfectly must fuse to that rotation even when
     // one of them reports the antipodal representation. The previous
-    // componentwise mean cancelled to near-zero here and, after normalising,
+    // componentwise mean canceled to near-zero here and, after normalizing,
     // returned an essentially arbitrary orientation.
     const auto q = quaternionFromZyxDegrees(45.0, 0.0, 0.0);
     const Eigen::Quaterniond negated{-q.w(), -q.x(), -q.y(), -q.z()};
@@ -139,7 +139,7 @@ TEST_CASE("antipodal quaternions fuse correctly", "[fuse][regression]") {
     }
 
     SECTION("two sensors reporting the same rotation with opposite signs") {
-        // The old componentwise mean cancelled exactly here and divided by a
+        // The old componentwise mean canceled exactly here and divided by a
         // zero magnitude, publishing a NaN pose.
         const std::vector<Pose> poses{
                 makePose({0, 0, 0}, q),
@@ -320,9 +320,118 @@ TEST_CASE("parseProbeProfiles accepts a well-formed config", "[parse]") {
     REQUIRE(profiles[0].label == "legacy triple");
     REQUIRE(profiles[0].tip.translation.isApprox(Eigen::Vector3d{0.157, 0, 0}));
 
-    // An omitted rotation must mean identity, so existing behaviour is preserved.
+    // An omitted rotation must mean identity, so existing behavior is preserved.
     REQUIRE(sameRotation(profiles[1].tip.rotation, kIdentity));
     REQUIRE(profiles[1].sensorCount == 1);
+}
+
+TEST_CASE("the tip offset and tip rotation must agree on the probe direction", "[parse][consistency]") {
+    auto parseText = [](const char *text) {
+        return parseProbeProfiles(nlohmann::json::parse(text));
+    };
+
+    SECTION("offset along +x with no rotation is consistent") {
+        REQUIRE(parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[0.194,0,0]}]})")
+                        .size() == 1);
+    }
+
+    SECTION("a negated offset without a matching rotation is refused") {
+        // The real case this exists for: the sensor is mounted with its +x
+        // pointing away from the tip, someone negates the offset, and the
+        // position then looks right while the published orientation -- and
+        // every normal drawn from it -- faces backwards.
+        REQUIRE_THROWS_AS(parseText(R"({"probe_profiles":[
+                              {"sensor_count":1,"tip_offset_m":[-0.194,0,0]}]})"),
+                          std::runtime_error);
+
+        REQUIRE_THROWS_AS(parseText(R"({"probe_profiles":[
+                              {"sensor_count":1,"tip_offset_m":[-0.194,0,0],
+                               "tip_rotation_zyx_deg":[0,0,0]}]})"),
+                          std::runtime_error);
+    }
+
+    SECTION("a negated offset with the matching reversal is accepted") {
+        const auto profiles = parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[-0.194,0,0],
+                     "tip_rotation_zyx_deg":[180.0,0.0,0.0]}]})");
+
+        REQUIRE(profiles.size() == 1);
+    }
+
+    SECTION("an axis swap is refused") {
+        REQUIRE_THROWS_AS(parseText(R"({"probe_profiles":[
+                              {"sensor_count":1,"tip_offset_m":[0,0.194,0]}]})"),
+                          std::runtime_error);
+    }
+
+    SECTION("the slop a real calibration leaves is tolerated") {
+        // solvePointPivot returns a free vector, so the tip is never exactly on
+        // the probe axis. A couple of degrees must not be treated as a fault.
+        REQUIRE(parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[0.1814,0.004,-0.002]}]})")
+                        .size() == 1);
+    }
+
+    SECTION("a zero offset has no direction to check") {
+        REQUIRE(parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[0,0,0]}]})")
+                        .size() == 1);
+    }
+
+    SECTION("the message says what breaks and how to fix it") {
+        try {
+            parseText(R"({"probe_profiles":[
+                    {"sensor_count":1,"tip_offset_m":[-0.194,0,0]}]})");
+            REQUIRE(false);
+        } catch (const std::runtime_error &e) {
+            const std::string message = e.what();
+            REQUIRE(message.find("180") != std::string::npos);
+            REQUIRE(message.find("normal") != std::string::npos);
+            REQUIRE(message.find("--calibrate") != std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("the expected frame rate is required and validated", "[config][framerate]") {
+    SECTION("a valid rate is returned") {
+        REQUIRE(parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 240}}) == 240);
+        REQUIRE(parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 30}}) == 30);
+    }
+
+    SECTION("absence is an error, not a default") {
+        // Same reasoning as probe_profiles: a config that declines to say what
+        // rig it describes cannot have the claim checked.
+        REQUIRE_THROWS_AS(parseExpectedFrameRateHz(nlohmann::json::object()), std::runtime_error);
+    }
+
+    SECTION("a rate the device cannot produce is refused at parse time") {
+        // 100 Hz could never match, so failing here beats failing against the
+        // device with a message about the device.
+        REQUIRE_THROWS_AS(parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 100}}),
+                          std::runtime_error);
+    }
+
+    SECTION("non-integers are refused") {
+        REQUIRE_THROWS_AS(
+                parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", "240"}}),
+                std::runtime_error);
+        REQUIRE_THROWS_AS(
+                parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 240.5}}),
+                std::runtime_error);
+    }
+
+    SECTION("the message names the key and the valid rates") {
+        try {
+            parseExpectedFrameRateHz(nlohmann::json::object());
+            REQUIRE(false);
+        } catch (const std::runtime_error &e) {
+            const std::string message = e.what();
+            REQUIRE(message.find("expected_frame_rate_hz") != std::string::npos);
+            REQUIRE(message.find("240") != std::string::npos);
+            REQUIRE(message.find("README") != std::string::npos);
+        }
+    }
 }
 
 TEST_CASE("parseProbeProfiles rejects malformed configs", "[parse]") {

@@ -4,6 +4,8 @@
 
 #include "ProbeProfile.hpp"
 
+#include "DeviceState.hpp"
+
 #include <cmath>
 #include <set>
 #include <sstream>
@@ -14,6 +16,13 @@ namespace mdx {
 namespace {
 
 constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
+
+/// How far the tip offset may point away from the tip frame's own +x axis.
+/// Deliberately generous: this is here to catch a reversed sign or a swapped
+/// axis, not to police the few degrees of slop that a real calibration leaves
+/// when the tip is not perfectly on the probe's axis.
+constexpr double kMaxTipAxisDisagreementDeg = 30.0;
 
 /// A sensor quaternion this far from unit norm is a malformed frame, not a
 /// rounding artefact: the Viper streams unit quaternions.
@@ -92,7 +101,7 @@ std::optional<Pose> fusePoses(const std::vector<Pose> &poses) {
         positionSum += pose.position;
 
         // q and -q are the same rotation. Without this flip the componentwise
-        // sum of antipodal representations cancels, and normalising the
+        // sum of antipodal representations cancels, and normalizing the
         // near-zero result yields an arbitrary orientation.
         Eigen::Quaterniond q = pose.orientation.normalized();
         if (q.coeffs().dot(reference.coeffs()) < 0.0)
@@ -185,6 +194,36 @@ std::vector<ProbeProfile> parseProbeProfiles(const nlohmann::json &settings) {
             profile.tip.rotation = quaternionFromZyxDegrees(zyx.x(), zyx.y(), zyx.z());
         }
 
+        // Both fields answer the same question -- which way along the sensor
+        // does the probe point -- and nothing else keeps them in step. The tip
+        // frame's +x is the along-probe direction by convention, so the offset
+        // has to lie along it. When they disagree the tip lands in the right
+        // place while the published orientation faces the other way, which
+        // silently reverses the probe geometry and every point-cloud normal
+        // drawn from it. That is invisible in the position, so it is caught
+        // here instead.
+        if (profile.tip.translation.norm() > 1e-9) {
+            const Eigen::Vector3d tipAxis = profile.tip.rotation * Eigen::Vector3d::UnitX();
+            const Eigen::Vector3d offsetDirection = profile.tip.translation.normalized();
+            const double alignment = std::max(-1.0, std::min(1.0, tipAxis.dot(offsetDirection)));
+            const double disagreementDeg = std::acos(alignment) * kRadToDeg;
+
+            if (disagreementDeg > kMaxTipAxisDisagreementDeg) {
+                std::ostringstream ss;
+                ss << where << ": \"tip_offset_m\" and \"tip_rotation_zyx_deg\" disagree by "
+                   << static_cast<int>(disagreementDeg)
+                   << " degrees about which way the probe points. The tip frame's +x is the "
+                      "along-probe direction, so the offset must lie along it, but this offset "
+                      "points elsewhere. The tip position would still land correctly while the "
+                      "published orientation faced the other way, reversing the drawn probe and "
+                      "every point-cloud normal taken from it. If the offset was negated to "
+                      "correct for how the sensor is mounted, the rotation has to say so too -- "
+                      "a straight reversal is \"tip_rotation_zyx_deg\": [180.0, 0.0, 0.0]. The "
+                      "exact rotation, including roll, is what \"viper --calibrate\" solves for.";
+                throw std::runtime_error(ss.str());
+            }
+        }
+
         if (entry.contains("label")) {
             if (!entry["label"].is_string()) {
                 throw std::runtime_error(where + ": \"label\" must be a string");
@@ -196,6 +235,32 @@ std::vector<ProbeProfile> parseProbeProfiles(const nlohmann::json &settings) {
     }
 
     return profiles;
+}
+
+int parseExpectedFrameRateHz(const nlohmann::json &settings) {
+    if (!settings.contains("expected_frame_rate_hz")) {
+        throw std::runtime_error(
+                "\"expected_frame_rate_hz\" is required. It states the Viper frame rate this "
+                "config was written for, and startup refuses to run if the SEU is set to "
+                "anything else -- sample density, latency and the meaning of every recorded "
+                "timestamp all follow from it. Set it to " + supportedFrameRateList() +
+                ". See the \"Expected frame rate\" section of README.md.");
+    }
+
+    const auto &value = settings.at("expected_frame_rate_hz");
+    if (!value.is_number_integer()) {
+        throw std::runtime_error("\"expected_frame_rate_hz\" must be an integer number of Hz (" +
+                                 supportedFrameRateList() + ")");
+    }
+
+    const int hz = value.get<int>();
+    if (!isSupportedFrameRateHz(hz)) {
+        throw std::runtime_error("\"expected_frame_rate_hz\" is " + std::to_string(hz) +
+                                 ", which the Viper cannot produce. Valid rates are " +
+                                 supportedFrameRateList() + ".");
+    }
+
+    return hz;
 }
 
 std::string describeProfile(const ProbeProfile &profile) {

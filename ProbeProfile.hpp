@@ -57,7 +57,7 @@ Eigen::Quaterniond quaternionFromZyxDegrees(double azimuthDeg, double elevationD
 /// componentwise too, but each quaternion is first flipped into the hemisphere
 /// of the first one: q and -q represent the same rotation, so summing raw
 /// components can cancel to near-zero and produce an arbitrary result after
-/// normalisation.
+/// normalization.
 ///
 /// A single input pose is returned verbatim (no arithmetic, so no rounding):
 /// with one sensor the published pose is exactly what the device reported.
@@ -87,6 +87,17 @@ const ProbeProfile *selectProfile(const std::vector<ProbeProfile> &profiles, int
 /// offset_x/offset_y/offset_z keys: running with an offset that does not match
 /// the connected hardware silently misplaces the tip, so it is refused instead.
 std::vector<ProbeProfile> parseProbeProfiles(const nlohmann::json &settings);
+
+/// Parse the required "expected_frame_rate_hz" out of a parsed config document.
+///
+/// Required, and with no default, for the same reason probe_profiles is: the
+/// value states what rig this config describes, and a config that declines to
+/// say cannot have the claim checked. Must be one of the rates the SEU can
+/// actually produce -- a number it cannot reach could never match, so it is a
+/// config error rather than a run-time refusal.
+///
+/// Throws std::runtime_error with an actionable message if absent or invalid.
+int parseExpectedFrameRateHz(const nlohmann::json &settings);
 
 /// One-line summary of a profile, for logging.
 std::string describeProfile(const ProbeProfile &profile);
