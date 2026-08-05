@@ -42,6 +42,7 @@ int launchFoxglove(std::string config_filename) {
 
     // ---- Parsing runtime config options ---- //
     std::vector<mdx::ProbeProfile> probe_profiles;
+    int expected_frame_rate_hz = 0;
     float min_contact_force = 0.35;
     bool use_hardware_contact = true;
     bool contact_require_f1 = true;
@@ -88,6 +89,16 @@ int launchFoxglove(std::string config_filename) {
             return 1;
         }
 
+        try
+        {
+            expected_frame_rate_hz = mdx::parseExpectedFrameRateHz(settings);
+        }
+        catch (const std::exception &e)
+        {
+            cerr << "Invalid frame rate configuration in " << config_filename << ": " << e.what() << "\n";
+            return 1;
+        }
+
         if (settings.contains("minimum_contact_force"))
         {
             min_contact_force = settings["minimum_contact_force"];
@@ -130,6 +141,7 @@ int launchFoxglove(std::string config_filename) {
     {
         cout << "        " << mdx::describeProfile(profile) << endl;
     }
+    cout << "    expected_frame_rate_hz:" << expected_frame_rate_hz << endl;
     cout << "    pressure_usb_id:" << pressure_usb_id << endl;
 
     cout << "    minimum_contact_force:" << min_contact_force << endl;
@@ -152,7 +164,7 @@ int launchFoxglove(std::string config_filename) {
 
     // The profiles go in through the constructor: it starts the read threads,
     // so anything set afterwards would miss the first frames.
-    Viper viper{&fgInterface, probe_profiles, 10, 100};
+    Viper viper{&fgInterface, probe_profiles, expected_frame_rate_hz, 10, 100};
 
     std::atomic_bool done = false;
     sigint_handler = [&]

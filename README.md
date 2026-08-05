@@ -139,6 +139,51 @@ on top of them and the result looks like a mounting fault rather than a configur
 | `CMD_BORESIGHT` | orientations are pre-rotated, so the tip offset is applied along a rotated frame |
 | `CMD_SRC_ROTATION` | the whole tracker frame is rotated |
 
+### Expected frame rate
+
+`viper-config.json` must carry the rate the rig is meant to run at:
+
+```json
+"expected_frame_rate_hz": 240
+```
+
+**Required, with no default**, for the same reason `probe_profiles` is: the value states what rig the config
+describes, and a config that declines to say cannot have the claim checked. Valid values are the only rates
+the SEU can produce — 30, 60, 120, 240, 480, 960. Anything else is rejected while parsing rather than against
+the device, since a rate the hardware cannot reach could never match.
+
+Startup then checks it **twice**, and refuses to run on either failure:
+
+| check | what it catches | how |
+| --- | --- | --- |
+| **Configured** | an SEU reconfigured by another tool | exact comparison against `CMD_FRAMERATE` |
+| **Delivered** | dropped frames, a link that cannot carry the rate | frames counted on arrival, within ±10% |
+
+The second exists because the first cannot see it. `CMD_FRAMERATE` reports what the SEU is *set to*, not what
+reaches this program — and the SEU has no way to know that frames are being lost downstream of it. The
+delivered figure counts **arrivals**, deliberately rather than reading the device's own frame counter, which
+advances whether or not the frame gets to us.
+
+Note what this is *not* protecting against. Poses stay geometrically correct at any rate; nothing in this
+program derives timing from it. What a wrong rate costs you is sample density, latency, and the comparability
+of one recording with another.
+
+Two details worth knowing:
+
+- **The delivered check is measured, so it is deliberately slow.** It settles for 0.5 s after the first frame
+  — enumeration and buffering effects at stream start have nothing to do with whether the link can sustain
+  the rate — then counts over 2 s. That makes the measurement quantization-limited: at the worst case of
+  30 Hz, one frame either way over 2 s is 1.7%, comfortably inside the ±10% band. All three entry points wait
+  for the verdict before proceeding.
+- **Increment mode skips the delivered check, loudly.** In that mode the device reports only after movement,
+  so arrival rate stops being a measure of link health. Refusing there would make increment mode effectively
+  illegal, which is a larger decision than this check should make — so it is skipped and a warning records
+  that the configured rate was verified while what actually arrives was not.
+
+An unreadable `CMD_FRAMERATE` **stops the run**, which is stricter than the other guards — they record an
+unreadable setting as unverified and continue. The difference is deliberate: this is the one setting the
+config makes a positive claim about, and the delivered check has nothing to compare against without it.
+
 **Settings that affect latency or cadence are logged, not gated**: `CMD_FILTER`, `CMD_PREDFILTER_CFG` and
 `_EXT`, `CMD_FRAMERATE`, `CMD_INCREMENT`, and `CMD_WHOAMI` (device, serial, firmware). Increment mode is worth
 noticing — it makes the device report only after a movement threshold, which presents as an irregular stream

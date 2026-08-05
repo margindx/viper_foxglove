@@ -393,6 +393,47 @@ TEST_CASE("the tip offset and tip rotation must agree on the probe direction", "
     }
 }
 
+TEST_CASE("the expected frame rate is required and validated", "[config][framerate]") {
+    SECTION("a valid rate is returned") {
+        REQUIRE(parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 240}}) == 240);
+        REQUIRE(parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 30}}) == 30);
+    }
+
+    SECTION("absence is an error, not a default") {
+        // Same reasoning as probe_profiles: a config that declines to say what
+        // rig it describes cannot have the claim checked.
+        REQUIRE_THROWS_AS(parseExpectedFrameRateHz(nlohmann::json::object()), std::runtime_error);
+    }
+
+    SECTION("a rate the device cannot produce is refused at parse time") {
+        // 100 Hz could never match, so failing here beats failing against the
+        // device with a message about the device.
+        REQUIRE_THROWS_AS(parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 100}}),
+                          std::runtime_error);
+    }
+
+    SECTION("non-integers are refused") {
+        REQUIRE_THROWS_AS(
+                parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", "240"}}),
+                std::runtime_error);
+        REQUIRE_THROWS_AS(
+                parseExpectedFrameRateHz(nlohmann::json{{"expected_frame_rate_hz", 240.5}}),
+                std::runtime_error);
+    }
+
+    SECTION("the message names the key and the valid rates") {
+        try {
+            parseExpectedFrameRateHz(nlohmann::json::object());
+            REQUIRE(false);
+        } catch (const std::runtime_error &e) {
+            const std::string message = e.what();
+            REQUIRE(message.find("expected_frame_rate_hz") != std::string::npos);
+            REQUIRE(message.find("240") != std::string::npos);
+            REQUIRE(message.find("README") != std::string::npos);
+        }
+    }
+}
+
 TEST_CASE("parseProbeProfiles rejects malformed configs", "[parse]") {
     auto parseText = [](const char *text) {
         return parseProbeProfiles(nlohmann::json::parse(text));

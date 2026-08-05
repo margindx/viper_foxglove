@@ -4,6 +4,8 @@
 
 #include "ProbeProfile.hpp"
 
+#include "DeviceState.hpp"
+
 #include <cmath>
 #include <set>
 #include <sstream>
@@ -233,6 +235,32 @@ std::vector<ProbeProfile> parseProbeProfiles(const nlohmann::json &settings) {
     }
 
     return profiles;
+}
+
+int parseExpectedFrameRateHz(const nlohmann::json &settings) {
+    if (!settings.contains("expected_frame_rate_hz")) {
+        throw std::runtime_error(
+                "\"expected_frame_rate_hz\" is required. It states the Viper frame rate this "
+                "config was written for, and startup refuses to run if the SEU is set to "
+                "anything else -- sample density, latency and the meaning of every recorded "
+                "timestamp all follow from it. Set it to " + supportedFrameRateList() +
+                ". See the \"Expected frame rate\" section of README.md.");
+    }
+
+    const auto &value = settings.at("expected_frame_rate_hz");
+    if (!value.is_number_integer()) {
+        throw std::runtime_error("\"expected_frame_rate_hz\" must be an integer number of Hz (" +
+                                 supportedFrameRateList() + ")");
+    }
+
+    const int hz = value.get<int>();
+    if (!isSupportedFrameRateHz(hz)) {
+        throw std::runtime_error("\"expected_frame_rate_hz\" is " + std::to_string(hz) +
+                                 ", which the Viper cannot produce. Valid rates are " +
+                                 supportedFrameRateList() + ".");
+    }
+
+    return hz;
 }
 
 std::string describeProfile(const ProbeProfile &profile) {

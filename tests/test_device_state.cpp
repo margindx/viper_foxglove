@@ -63,6 +63,66 @@ TEST_CASE("sensor origin is named for the record", "[device]") {
     REQUIRE(sensorOriginLabel(99).find("unrecognized") != std::string::npos);
 }
 
+TEST_CASE("the expected frame rate is checked two ways", "[device][framerate]") {
+    SECTION("codes map to rates, and unknown codes to nothing") {
+        REQUIRE(frameRateHzFromCode(0) == 30);
+        REQUIRE(frameRateHzFromCode(3) == 240);
+        REQUIRE(frameRateHzFromCode(5) == 960);
+        REQUIRE_FALSE(frameRateHzFromCode(6).has_value());
+        REQUIRE_FALSE(frameRateHzFromCode(99).has_value());
+    }
+
+    SECTION("only rates the SEU can produce are accepted") {
+        REQUIRE(isSupportedFrameRateHz(30));
+        REQUIRE(isSupportedFrameRateHz(960));
+        // 100 Hz is a perfectly reasonable number that this device cannot
+        // reach, so it could never match and is a config error.
+        REQUIRE_FALSE(isSupportedFrameRateHz(100));
+        REQUIRE_FALSE(isSupportedFrameRateHz(0));
+        REQUIRE_FALSE(isSupportedFrameRateHz(-240));
+    }
+
+    SECTION("the delivered band is symmetric and 10% wide") {
+        REQUIRE_FALSE(deliveredRateOutOfBand(240, 240.0));
+        REQUIRE_FALSE(deliveredRateOutOfBand(240, 220.0));   // -8.3%
+        REQUIRE_FALSE(deliveredRateOutOfBand(240, 260.0));   // +8.3%
+        REQUIRE(deliveredRateOutOfBand(240, 210.0));         // -12.5%
+        REQUIRE(deliveredRateOutOfBand(240, 300.0));         // +25%
+
+        // The measurement is quantization-limited, so the worst realistic case
+        // -- 30 Hz counted over 2 s, one frame either way -- sits well inside.
+        REQUIRE_FALSE(deliveredRateOutOfBand(30, 30.5));
+        REQUIRE_FALSE(deliveredRateOutOfBand(30, 29.5));
+
+        // A dead stream is a mismatch, not a pass.
+        REQUIRE(deliveredRateOutOfBand(240, 0.0));
+        REQUIRE(deliveredRateOutOfBand(0, 240.0));
+    }
+
+    SECTION("refusals name both numbers and how to reconcile them") {
+        const auto mismatch = frameRateMismatchMessage(240, 1);   // SEU at 60 Hz
+        REQUIRE(mismatch.find("60 Hz") != std::string::npos);
+        REQUIRE(mismatch.find("240") != std::string::npos);
+        // Either side may be the one that is wrong, so both fixes are offered.
+        REQUIRE(mismatch.find("expected_frame_rate_hz") != std::string::npos);
+
+        const auto unreadable = frameRateUnreadableMessage(240);
+        REQUIRE(unreadable.find("240") != std::string::npos);
+        REQUIRE(unreadable.find("not evidence") != std::string::npos);
+    }
+
+    SECTION("a shortfall is attributed to the link, not to the SEU") {
+        // The SEU already passed the configured check, so frames going missing
+        // between it and us is the only thing left.
+        const auto slow = deliveredFrameRateMessage(240, 61.0, 122, 2.0);
+        REQUIRE(slow.find("61.0") != std::string::npos);
+        REQUIRE(slow.find("dropped") != std::string::npos);
+
+        const auto fast = deliveredFrameRateMessage(240, 300.0, 600, 2.0);
+        REQUIRE(fast.find("faster than configured") != std::string::npos);
+    }
+}
+
 TEST_CASE("frame rate codes map to their rates", "[device]") {
     REQUIRE(frameRateLabel(0) == "30 Hz");
     REQUIRE(frameRateLabel(3) == "240 Hz");

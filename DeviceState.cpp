@@ -79,6 +79,72 @@ std::string frameRateLabel(std::uint32_t code) {
     return "unrecognized frame rate code " + std::to_string(code);
 }
 
+std::optional<int> frameRateHzFromCode(std::uint32_t code) {
+    switch (code) {
+        case 0: return 30;
+        case 1: return 60;
+        case 2: return 120;
+        case 3: return 240;
+        case 4: return 480;
+        case 5: return 960;
+        default: break;
+    }
+    return std::nullopt;
+}
+
+bool isSupportedFrameRateHz(int hz) {
+    return hz == 30 || hz == 60 || hz == 120 || hz == 240 || hz == 480 || hz == 960;
+}
+
+std::string supportedFrameRateList() {
+    return "30, 60, 120, 240, 480 or 960";
+}
+
+bool deliveredRateOutOfBand(int expectedHz, double deliveredHz) {
+    if (expectedHz <= 0)
+        return true;
+    const double ratio = deliveredHz / static_cast<double>(expectedHz);
+    return std::abs(ratio - 1.0) > kDeliveredRateTolerance;
+}
+
+std::string frameRateMismatchMessage(int expectedHz, std::uint32_t reportedCode) {
+    std::ostringstream ss;
+    ss << "The SEU is running at " << frameRateLabel(reportedCode) << " but the config expects "
+       << expectedHz << " Hz. Sample density, latency and the meaning of every recorded "
+          "timestamp all follow from the rate, so a recording made at one rate is not "
+          "comparable with one made at another. Either set the SEU to " << expectedHz
+       << " Hz or update \"expected_frame_rate_hz\" to match the rate you intend to use.";
+    return ss.str();
+}
+
+std::string frameRateUnreadableMessage(int expectedHz) {
+    std::ostringstream ss;
+    ss << "The SEU did not report its frame rate, so the configured expectation of " << expectedHz
+       << " Hz could not be confirmed. Failing to read a setting is not evidence that it is "
+          "correct, and this is the one setting the delivered-rate check needs to compare "
+          "against.";
+    return ss.str();
+}
+
+std::string deliveredFrameRateMessage(int expectedHz, double deliveredHz, std::uint64_t frames,
+                                      double seconds) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(1);
+    ss << "Frames are arriving at " << deliveredHz << " Hz, but the config expects " << expectedHz
+       << " Hz (" << frames << " frames over " << std::setprecision(2) << seconds << " s).";
+
+    if (deliveredHz < expectedHz) {
+        ss << " The SEU reports the configured rate, so the shortfall is between it and this "
+              "program: frames are being dropped, or the link cannot carry the rate. Check the "
+              "dropped-frame counts in the log, and try a lower rate to confirm.";
+    } else {
+        ss << " That is faster than configured, which should not happen and suggests the rate "
+              "reported by the SEU is not the rate it is running at.";
+    }
+
+    return ss.str();
+}
+
 std::string boresightMessage(int sensor, const DeviceRotation &rotation) {
     std::ostringstream ss;
     ss << "The Viper has a boresight of " << rotation.describe() << " set on sensor " << sensor

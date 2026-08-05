@@ -27,6 +27,7 @@
 #define VIPER_DEVICESTATE_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace mdx {
@@ -52,6 +53,30 @@ std::string sensorOriginLabel(std::uint32_t mode);
 
 /// "240 Hz", or the raw code when it is outside eViperFrameRate.
 std::string frameRateLabel(std::uint32_t code);
+
+/// The rate an eViperFrameRate code stands for, or empty for an unknown code.
+std::optional<int> frameRateHzFromCode(std::uint32_t code);
+
+/// The rates the SEU can actually produce: 30, 60, 120, 240, 480, 960.
+bool isSupportedFrameRateHz(int hz);
+std::string supportedFrameRateList();
+
+/// How far the delivered rate may sit from the configured one before the run is
+/// refused. The SEU emits frames on a fixed clock, so a healthy link tracks it
+/// closely and the measurement's own precision is quantization-limited -- about
+/// 1.7% at the worst case of 30 Hz over a 2 s window -- leaving this bound well
+/// clear of measurement noise.
+constexpr double kDeliveredRateTolerance = 0.10;
+
+/// Refusals for the expected-rate check. Each names both numbers and how to
+/// reconcile them, since either side may be the one that is wrong.
+std::string frameRateMismatchMessage(int expectedHz, std::uint32_t reportedCode);
+std::string frameRateUnreadableMessage(int expectedHz);
+std::string deliveredFrameRateMessage(int expectedHz, double deliveredHz, std::uint64_t frames,
+                                      double seconds);
+
+/// True when `deliveredHz` is outside the tolerance band around `expectedHz`.
+bool deliveredRateOutOfBand(int expectedHz, double deliveredHz);
 
 /// Refusal messages. Each names what was found, why it breaks the tip pose, and
 /// how to clear it.

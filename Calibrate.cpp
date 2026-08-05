@@ -95,6 +95,21 @@ bool confirmed(const std::string &question) {
     return answer == "y" || answer == "Y" || answer == "yes" || answer == "Yes";
 }
 
+/// Read the required expected frame rate. Unlike the profiles, this is not
+/// optional here: it is checked against the device in every mode, and a bench
+/// tool that skipped the check would be the one place a misconfigured rig went
+/// unnoticed.
+std::optional<int> loadExpectedFrameRateHz(const std::string &configPath) {
+    try {
+        std::ifstream f(configPath);
+        return parseExpectedFrameRateHz(nlohmann::json::parse(f));
+    } catch (const std::exception &e) {
+        std::cerr << "Invalid frame rate configuration in " << configPath << ": " << e.what()
+                  << "\n";
+        return std::nullopt;
+    }
+}
+
 /// Load probe_profiles if the config has any. Unlike the normal startup path
 /// this tolerates their absence, since bootstrapping a new probe is the point.
 std::vector<ProbeProfile> loadProfilesIfPresent(const std::string &configPath) {
@@ -392,6 +407,13 @@ int runCalibration(const std::string &configPath) {
     // Held by optional so a failure to start (an unwritable directory, a stale
     // recording still held open) reports and exits rather than escaping as an
     // uncaught exception and aborting the process.
+    // Parsed before anything is opened or the device is touched, so a config
+    // error fails cleanly rather than leaving a stray recording behind.
+    const auto expectedRate = loadExpectedFrameRateHz(configPath);
+    if (!expectedRate.has_value())
+        return 1;
+    const int expectedFrameRateHz = *expectedRate;
+
     std::optional<FoxgloveInterface> fgInterface;
     try {
         fgInterface.emplace("viper-calibration.mcap");
@@ -406,7 +428,8 @@ int runCalibration(const std::string &configPath) {
     // against them for the before/after comparison, but their absence is fine.
     auto profiles = loadProfilesIfPresent(configPath);
 
-    Viper viper{&fgInterface.value(), profiles, 10, 100, /*calibrationMode=*/true};
+    Viper viper{&fgInterface.value(), profiles, expectedFrameRateHz, 10, 100,
+                /*calibrationMode=*/true};
 
     std::cout << "Waiting for pose data...\n";
     for (int i = 0; i < 250 && !viper.latestFusedPose().has_value(); i++) {
@@ -419,6 +442,22 @@ int runCalibration(const std::string &configPath) {
 
     if (!viper.latestFusedPose().has_value()) {
         std::cerr << "No usable pose data from the Viper. Check the sensors and try again.\n";
+        return 1;
+    }
+
+    // The delivered-rate window closes a couple of seconds after the stream
+    // opens, so the refusal it can raise arrives after the first pose. Wait for
+    // the verdict rather than proceeding on a rig that cannot carry its rate.
+    std::cout << "Confirming frame rate...\n";
+    for (int i = 0; i < 400 && !viper.deliveredRateChecked(); i++) {
+        if (viper.hasFatalError()) {
+            std::cerr << "Cannot calibrate: " << viper.fatalErrorMessage() << "\n";
+            return 1;
+        }
+        std::this_thread::sleep_for(20ms);
+    }
+    if (viper.hasFatalError()) {
+        std::cerr << "Cannot calibrate: " << viper.fatalErrorMessage() << "\n";
         return 1;
     }
 

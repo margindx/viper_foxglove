@@ -310,6 +310,12 @@ void Viper::readDeviceState(uint32_t nSensors) {
 
             fgInterface_->logInfo("Increment mode" + label + ": " +
                                   mdx::describeIncrement(settings));
+
+            // Any sensor in increment mode is enough: the stream then carries
+            // frames only when something moved, so arrival rate stops being a
+            // measure of link health.
+            if (settings.enabled)
+                incrementModeActive_ = true;
         } else {
             note("increment mode" + label);
         }
@@ -317,10 +323,25 @@ void Viper::readDeviceState(uint32_t nSensors) {
 
     {
         uint32_t frameRate = 0;
-        if (queryConfig(CMD_FRAMERATE, 0, &frameRate, sizeof(frameRate)))
-            fgInterface_->logInfo("Frame rate: " + mdx::frameRateLabel(frameRate));
-        else
+        if (queryConfig(CMD_FRAMERATE, 0, &frameRate, sizeof(frameRate))) {
+            fgInterface_->logInfo("Frame rate: " + mdx::frameRateLabel(frameRate) +
+                                  " (config expects " + std::to_string(expectedFrameRateHz_) +
+                                  " Hz)");
+
+            const auto reportedHz = mdx::frameRateHzFromCode(frameRate);
+            if (!reportedHz.has_value() || *reportedHz != expectedFrameRateHz_) {
+                raiseFatalError(mdx::frameRateMismatchMessage(expectedFrameRateHz_, frameRate));
+                return;
+            }
+        } else {
+            // Unlike the other settings, an unreadable frame rate stops the
+            // run. Two reasons: the config now states an expectation that
+            // cannot otherwise be confirmed, and the delivered-rate check has
+            // nothing to compare against without it.
             note("frame rate");
+            raiseFatalError(mdx::frameRateUnreadableMessage(expectedFrameRateHz_));
+            return;
+        }
     }
 
     fgInterface_->logInfo("--- end of Viper device configuration ---");
@@ -338,7 +359,82 @@ void Viper::readDeviceState(uint32_t nSensors) {
     }
 }
 
+void Viper::measureDeliveredRate() {
+    // Settle before measuring. The first moments after the stream opens carry
+    // enumeration and buffering effects that have nothing to do with whether
+    // the link can sustain the rate, and with a 10% band there is no room to
+    // absorb them.
+    constexpr auto kSettle = std::chrono::milliseconds(500);
+    // Long enough that counting whole frames is precise: the worst case is
+    // 30 Hz, where one frame either way over 2 s is 1.7%.
+    constexpr auto kWindow = std::chrono::milliseconds(2000);
+
+    if (rateChecked_)
+        return;
+
+    std::string refusal;
+    {
+        std::lock_guard<std::mutex> guard{rateMtx_};
+        const auto now = std::chrono::steady_clock::now();
+
+        if (!rateSawFirstFrame_) {
+            rateSawFirstFrame_ = true;
+            rateFirstFrame_ = now;
+            return;
+        }
+
+        if (!rateWindowOpen_) {
+            if (now - rateFirstFrame_ < kSettle)
+                return;
+
+            rateWindowOpen_ = true;
+            rateWindowStart_ = now;
+            rateFrames_ = 0;
+            return;
+        }
+
+        rateFrames_++;
+
+        const auto elapsed = now - rateWindowStart_;
+        if (elapsed < kWindow)
+            return;
+
+        const double seconds = std::chrono::duration<double>(elapsed).count();
+        deliveredFrameRateHz_ = static_cast<double>(rateFrames_) / seconds;
+        rateChecked_ = true;
+
+        if (incrementModeActive_) {
+            // Skipped rather than failed. Increment mode is a legitimate
+            // setting this program logs rather than gates, and refusing here
+            // would make it effectively illegal -- a larger decision than the
+            // rate check was asked to make. Said loudly so the gap is on the
+            // record.
+            fgInterface_->logWarning(
+                    "Delivered frame rate NOT checked: a sensor is in increment mode, so frames "
+                    "arrive only after movement and the arrival rate says nothing about the "
+                    "link. The configured rate was verified; what actually arrives was not.");
+            return;
+        }
+
+        std::stringstream ss;
+        ss << "Delivered frame rate: " << std::fixed << std::setprecision(1)
+           << deliveredFrameRateHz_ << " Hz over " << rateFrames_ << " frames";
+        fgInterface_->logInfo(ss.str());
+
+        if (mdx::deliveredRateOutOfBand(expectedFrameRateHz_, deliveredFrameRateHz_)) {
+            refusal = mdx::deliveredFrameRateMessage(expectedFrameRateHz_, deliveredFrameRateHz_,
+                                                     rateFrames_, seconds);
+        }
+    }
+
+    // Raised outside the lock: raiseFatalError takes its own.
+    if (!refusal.empty())
+        raiseFatalError(refusal);
+}
+
 void Viper::monitorFrame(SENFRAMEDATA *pfd_all, uint32_t nSensors, uint32_t frameCounter) {
+    measureDeliveredRate();
+
     // The frame counter is in every frame and was previously read and thrown
     // away. Gaps in it are the direct evidence of dropped data that an
     // unexplained publish rate only hints at.
